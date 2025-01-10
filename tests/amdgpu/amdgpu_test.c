@@ -75,6 +75,7 @@
 #define HOTUNPLUG_TESTS_STR "Hotunplug Tests"
 #define CP_DMA_TESTS_STR "CP DMA Tests"
 #define USERQUEUE_VCN_DEC_TESTS_STR "UserQueue VCN Decode Tests"
+#define USERQUEUE_VCN_ENC_TESTS_STR "UserQueue VCN Encode Tests"
 
 /**
  *  Open handles for amdgpu devices
@@ -177,6 +178,12 @@ static CU_SuiteInfo suites[] = {
 		.pCleanupFunc = suite_vcn_userq_dec_tests_clean,
 		.pTests = userq_vcn_dec_tests,
 	},
+	{
+		.pName = USERQUEUE_VCN_ENC_TESTS_STR,
+		.pInitFunc = suite_vcn_userq_enc_tests_init,
+		.pCleanupFunc = suite_vcn_userq_enc_tests_clean,
+		.pTests = userq_vcn_enc_tests,
+	},
 	CU_SUITE_INFO_NULL,
 };
 
@@ -252,6 +259,10 @@ static Suites_Active_Status suites_active_stat[] = {
 		{
 			.pName = USERQUEUE_VCN_DEC_TESTS_STR,
 			.pActive = suite_vcn_userq_dec_tests_enable,
+		},
+		{
+			.pName = USERQUEUE_VCN_ENC_TESTS_STR,
+			.pActive = suite_vcn_userq_enc_tests_enable,
 		},
 };
 

@@ -322,6 +322,26 @@ extern CU_TestInfo userq_vcn_dec_tests[];
  */
 CU_BOOL suite_vcn_userq_dec_tests_enable(void);
 
+/**
+ * Initialize usermode queue enc test suite
+ */
+int suite_vcn_userq_enc_tests_init(void);
+
+/**
+ * Deinitialize usermode queue enc test suite
+ */
+int suite_vcn_userq_enc_tests_clean(void);
+
+/**
+ * Tests in usermode queue vcn enc test suite
+ */
+extern CU_TestInfo userq_vcn_enc_tests[];
+
+/**
+ * Decide if the suite is enabled by default or not.
+ */
+CU_BOOL suite_vcn_userq_enc_tests_enable(void);
+
 extern void
 amdgpu_command_submission_write_linear_helper_with_secure(amdgpu_device_handle
 							  device,
