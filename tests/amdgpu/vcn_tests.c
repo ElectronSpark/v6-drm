@@ -36,6 +36,7 @@
 #include "amdgpu_internal.h"
 #include "decode_messages.h"
 #include "frame.h"
+#include "vcn_tests.h"
 
 #define IB_SIZE		4096
 #define MAX_RESOURCES	16
@@ -64,30 +65,6 @@
 
 static bool vcn_dec_sw_ring = false;
 static bool vcn_unified_ring = false;
-
-#define H264_NAL_TYPE_NON_IDR_SLICE 1
-#define H264_NAL_TYPE_DP_A_SLICE 2
-#define H264_NAL_TYPE_DP_B_SLICE 3
-#define H264_NAL_TYPE_DP_C_SLICE 0x4
-#define H264_NAL_TYPE_IDR_SLICE 0x5
-#define H264_NAL_TYPE_SEI 0x6
-#define H264_NAL_TYPE_SEQ_PARAM 0x7
-#define H264_NAL_TYPE_PIC_PARAM 0x8
-#define H264_NAL_TYPE_ACCESS_UNIT 0x9
-#define H264_NAL_TYPE_END_OF_SEQ 0xa
-#define H264_NAL_TYPE_END_OF_STREAM 0xb
-#define H264_NAL_TYPE_FILLER_DATA 0xc
-#define H264_NAL_TYPE_SEQ_EXTENSION 0xd
-
-#define H264_START_CODE 0x000001
-
-struct amdgpu_vcn_bo {
-	amdgpu_bo_handle handle;
-	amdgpu_va_handle va_handle;
-	uint64_t addr;
-	uint64_t size;
-	uint8_t *ptr;
-};
 
 typedef struct rvcn_decode_buffer_s {
 	unsigned int valid_buf_flag;
@@ -139,23 +116,6 @@ struct amdgpu_vcn_reg {
 	uint32_t cntl;
 };
 
-typedef struct BufferInfo_t {
-	uint32_t numOfBitsInBuffer;
-	const uint8_t *decBuffer;
-	uint8_t decData;
-	uint32_t decBufferSize;
-	const uint8_t *end;
-} bufferInfo;
-
-typedef struct h264_decode_t {
-	uint8_t profile;
-	uint8_t level_idc;
-	uint8_t nal_ref_idc;
-	uint8_t nal_unit_type;
-	uint32_t pic_width, pic_height;
-	uint32_t slice_type;
-} h264_decode;
-
 static amdgpu_device_handle device_handle;
 static uint32_t major_version;
 static uint32_t minor_version;
@@ -202,18 +162,7 @@ static void amdgpu_cs_vcn_enc_destroy(void);
 
 static void amdgpu_cs_sq_head(uint32_t *base, int *offset, bool enc);
 static void amdgpu_cs_sq_ib_tail(uint32_t *end);
-static void h264_check_0s (bufferInfo * bufInfo, int count);
-static int32_t h264_se (bufferInfo * bufInfo);
-static inline uint32_t bs_read_u1(bufferInfo *bufinfo);
-static inline int bs_eof(bufferInfo *bufinfo);
-static inline uint32_t bs_read_u(bufferInfo* bufinfo, int n);
-static inline uint32_t bs_read_ue(bufferInfo* bufinfo);
-static uint32_t remove_03 (uint8_t *bptr, uint32_t len);
-static void scaling_list (uint32_t ix, uint32_t sizeOfScalingList, bufferInfo *bufInfo);
-static void h264_parse_sequence_parameter_set (h264_decode * dec, bufferInfo *bufInfo);
-static void h264_slice_header (h264_decode *dec, bufferInfo *bufInfo);
-static uint8_t h264_parse_nal (h264_decode *dec, bufferInfo *bufInfo);
-static uint32_t h264_find_next_start_code (uint8_t *pBuf, uint32_t bufLen);
+
 static int verify_checksum(uint8_t *buffer, uint32_t buffer_size);
 
 CU_TestInfo vcn_tests[] = {
@@ -947,11 +896,11 @@ static void amdgpu_cs_vcn_enc_create(void)
 	CU_ASSERT_EQUAL(r, 0);
 }
 
-static int32_t h264_se (bufferInfo * bufInfo)
+int32_t h264_se(bufferInfo *bufInfo)
 {
 	uint32_t ret;
 
-	ret = bs_read_ue (bufInfo);
+	ret = bs_read_ue(bufInfo);
 	if ((ret & 0x1) == 0) {
 		ret >>= 1;
 		int32_t temp = 0 - ret;
@@ -961,70 +910,17 @@ static int32_t h264_se (bufferInfo * bufInfo)
 	return (ret + 1) >> 1;
 }
 
-static void h264_check_0s (bufferInfo * bufInfo, int count)
+void h264_check_0s(bufferInfo *bufInfo, int count)
 {
 	uint32_t val;
 
-	val = bs_read_u (bufInfo, count);
+	val = bs_read_u(bufInfo, count);
 	if (val != 0) {
-		printf ("field error - %d bits should be 0 is %x\n", count, val);
+		printf("field error - %d bits should be 0 is %x\n", count, val);
 	}
 }
 
-static inline int bs_eof(bufferInfo * bufinfo)
-{
-	if (bufinfo->decBuffer >= bufinfo->end)
-		return 1;
-	else
-		return 0;
-}
-
-static inline uint32_t bs_read_u1(bufferInfo *bufinfo)
-{
-	uint32_t r = 0;
-	uint32_t temp = 0;
-
-	bufinfo->numOfBitsInBuffer--;
-	if (! bs_eof(bufinfo)) {
-		temp = (((bufinfo->decData)) >> bufinfo->numOfBitsInBuffer);
-		r = temp & 0x01;
-	}
-
-	if (bufinfo->numOfBitsInBuffer == 0) {
-		bufinfo->decBuffer++;
-		bufinfo->decData = *bufinfo->decBuffer;
-		bufinfo->numOfBitsInBuffer = 8;
-	}
-
-	return r;
-}
-
-static inline uint32_t bs_read_u(bufferInfo* bufinfo, int n)
-{
-	uint32_t r = 0;
-	int i;
-
-	for (i = 0; i < n; i++) {
-		r |= ( bs_read_u1(bufinfo) << ( n - i - 1 ) );
-	}
-
-	return r;
-}
-
-static inline uint32_t bs_read_ue(bufferInfo* bufinfo)
-{
-	int32_t r = 0;
-	int i = 0;
-
-	while( (bs_read_u1(bufinfo) == 0) && (i < 32) && (!bs_eof(bufinfo))) {
-		i++;
-	}
-	r = bs_read_u(bufinfo, i);
-	r += (1 << i) - 1;
-	return r;
-}
-
-static uint32_t remove_03 (uint8_t * bptr, uint32_t len)
+uint32_t remove_03(uint8_t *bptr, uint32_t len)
 {
 	uint32_t nal_len = 0;
 	while (nal_len + 2 < len) {
@@ -1032,7 +928,7 @@ static uint32_t remove_03 (uint8_t * bptr, uint32_t len)
 			bptr += 2;
 			nal_len += 2;
 			len--;
-			memmove (bptr, bptr + 1, len - nal_len);
+			memmove(bptr, bptr + 1, len - nal_len);
 		} else {
 			bptr++;
 			nal_len++;
@@ -1041,7 +937,7 @@ static uint32_t remove_03 (uint8_t * bptr, uint32_t len)
 	return len;
 }
 
-static void scaling_list (uint32_t ix, uint32_t sizeOfScalingList, bufferInfo * bufInfo)
+void scaling_list(uint32_t ix, uint32_t sizeOfScalingList, bufferInfo *bufInfo)
 {
 	uint32_t lastScale = 8, nextScale = 8;
 	uint32_t jx;
@@ -1049,7 +945,7 @@ static void scaling_list (uint32_t ix, uint32_t sizeOfScalingList, bufferInfo * 
 
 	for (jx = 0; jx < sizeOfScalingList; jx++) {
 		if (nextScale != 0) {
-			deltaScale = h264_se (bufInfo);
+			deltaScale = h264_se(bufInfo);
 			nextScale = (lastScale + deltaScale + 256) % 256;
 		}
 		if (nextScale == 0) {
@@ -1060,105 +956,104 @@ static void scaling_list (uint32_t ix, uint32_t sizeOfScalingList, bufferInfo * 
 	}
 }
 
-static void h264_parse_sequence_parameter_set (h264_decode * dec, bufferInfo * bufInfo)
+void h264_parse_sequence_parameter_set(h264_decode *dec, bufferInfo *bufInfo)
 {
 	uint32_t temp;
 
-	dec->profile = bs_read_u (bufInfo, 8);
-	bs_read_u (bufInfo, 1);		/* constaint_set0_flag */
-	bs_read_u (bufInfo, 1);		/* constaint_set1_flag */
-	bs_read_u (bufInfo, 1);		/* constaint_set2_flag */
-	bs_read_u (bufInfo, 1);		/* constaint_set3_flag */
-	bs_read_u (bufInfo, 1);		/* constaint_set4_flag */
-	bs_read_u (bufInfo, 1);		/* constaint_set5_flag */
+	dec->profile = bs_read_u(bufInfo, 8);
+	bs_read_u(bufInfo, 1);		/* constaint_set0_flag */
+	bs_read_u(bufInfo, 1);		/* constaint_set1_flag */
+	bs_read_u(bufInfo, 1);		/* constaint_set2_flag */
+	bs_read_u(bufInfo, 1);		/* constaint_set3_flag */
+	bs_read_u(bufInfo, 1);		/* constaint_set4_flag */
+	bs_read_u(bufInfo, 1);		/* constaint_set5_flag */
 
 
-	h264_check_0s (bufInfo, 2);
-	dec->level_idc = bs_read_u (bufInfo, 8);
-	bs_read_ue (bufInfo);	/* SPS id*/
+	h264_check_0s(bufInfo, 2);
+	dec->level_idc = bs_read_u(bufInfo, 8);
+	bs_read_ue(bufInfo);	/* SPS id*/
 
 	if (dec->profile == 100 || dec->profile == 110 ||
 		dec->profile == 122 || dec->profile == 144) {
-		uint32_t chroma_format_idc = bs_read_ue (bufInfo);
+		uint32_t chroma_format_idc = bs_read_ue(bufInfo);
 		if (chroma_format_idc == 3) {
-			bs_read_u (bufInfo, 1);	/* residual_colour_transform_flag */
+			bs_read_u(bufInfo, 1);	/* residual_colour_transform_flag */
 		}
-		bs_read_ue (bufInfo);	/* bit_depth_luma_minus8 */
-		bs_read_ue (bufInfo);	/* bit_depth_chroma_minus8 */
-		bs_read_u (bufInfo, 1);	/* qpprime_y_zero_transform_bypass_flag */
-		uint32_t seq_scaling_matrix_present_flag = bs_read_u (bufInfo, 1);
+		bs_read_ue(bufInfo);	/* bit_depth_luma_minus8 */
+		bs_read_ue(bufInfo);	/* bit_depth_chroma_minus8 */
+		bs_read_u(bufInfo, 1);	/* qpprime_y_zero_transform_bypass_flag */
+		uint32_t seq_scaling_matrix_present_flag = bs_read_u(bufInfo, 1);
 
 		if (seq_scaling_matrix_present_flag) {
 			for (uint32_t ix = 0; ix < 8; ix++) {
-				temp = bs_read_u (bufInfo, 1);
+				temp = bs_read_u(bufInfo, 1);
 				if (temp) {
-					scaling_list (ix, ix < 6 ? 16 : 64, bufInfo);
+					scaling_list(ix, ix < 6 ? 16 : 64, bufInfo);
 				}
 			}
 		}
 	}
 
-	bs_read_ue (bufInfo);	/* log2_max_frame_num_minus4 */
-	uint32_t pic_order_cnt_type = bs_read_ue (bufInfo);
+	bs_read_ue(bufInfo);	/* log2_max_frame_num_minus4 */
+	uint32_t pic_order_cnt_type = bs_read_ue(bufInfo);
 
 	if (pic_order_cnt_type == 0) {
-		bs_read_ue (bufInfo);	/* log2_max_pic_order_cnt_lsb_minus4 */
+		bs_read_ue(bufInfo);	/* log2_max_pic_order_cnt_lsb_minus4 */
 	} else if (pic_order_cnt_type == 1) {
-		bs_read_u (bufInfo, 1);	/* delta_pic_order_always_zero_flag */
-		h264_se (bufInfo);	/* offset_for_non_ref_pic */
-		h264_se (bufInfo);	/* offset_for_top_to_bottom_field */
-		temp = bs_read_ue (bufInfo);
-		for (uint32_t ix = 0; ix < temp; ix++) {
-			 h264_se (bufInfo);	/* offset_for_ref_frame[index] */
-		}
+		bs_read_u(bufInfo, 1);	/* delta_pic_order_always_zero_flag */
+		h264_se(bufInfo);	/* offset_for_non_ref_pic */
+		h264_se(bufInfo);	/* offset_for_top_to_bottom_field */
+		temp = bs_read_ue(bufInfo);
+		for (uint32_t ix = 0; ix < temp; ix++)
+			h264_se(bufInfo);	/* offset_for_ref_frame[index] */
 	}
-	bs_read_ue (bufInfo);	/* num_ref_frames */
-	bs_read_u (bufInfo, 1);	/* gaps_in_frame_num_flag */
-	uint32_t PicWidthInMbs = bs_read_ue (bufInfo) + 1;
+	bs_read_ue(bufInfo);	/* num_ref_frames */
+	bs_read_u(bufInfo, 1);	/* gaps_in_frame_num_flag */
+	uint32_t PicWidthInMbs = bs_read_ue(bufInfo) + 1;
 
 	dec->pic_width = PicWidthInMbs * 16;
-	uint32_t PicHeightInMapUnits = bs_read_ue (bufInfo) + 1;
+	uint32_t PicHeightInMapUnits = bs_read_ue(bufInfo) + 1;
 
 	dec->pic_height = PicHeightInMapUnits * 16;
-	uint32_t frame_mbs_only_flag = bs_read_u (bufInfo, 1);
+	uint32_t frame_mbs_only_flag = bs_read_u(bufInfo, 1);
 	if (!frame_mbs_only_flag) {
-		bs_read_u (bufInfo, 1);	/* mb_adaptive_frame_field_flag */
+		bs_read_u(bufInfo, 1);	/* mb_adaptive_frame_field_flag */
 	}
-	bs_read_u (bufInfo, 1);	/* direct_8x8_inference_flag */
-	temp = bs_read_u (bufInfo, 1);
+	bs_read_u(bufInfo, 1);	/* direct_8x8_inference_flag */
+	temp = bs_read_u(bufInfo, 1);
 	if (temp) {
-		bs_read_ue (bufInfo);	/* frame_crop_left_offset */
-		bs_read_ue (bufInfo);	/* frame_crop_right_offset */
-		bs_read_ue (bufInfo);	/* frame_crop_top_offset */
-		bs_read_ue (bufInfo);	/* frame_crop_bottom_offset */
+		bs_read_ue(bufInfo);	/* frame_crop_left_offset */
+		bs_read_ue(bufInfo);	/* frame_crop_right_offset */
+		bs_read_ue(bufInfo);	/* frame_crop_top_offset */
+		bs_read_ue(bufInfo);	/* frame_crop_bottom_offset */
 	}
-	temp = bs_read_u (bufInfo, 1);	/* VUI Parameters  */
+	temp = bs_read_u(bufInfo, 1);	/* VUI Parameters  */
 }
 
-static void h264_slice_header (h264_decode * dec, bufferInfo * bufInfo)
+void h264_slice_header(h264_decode *dec, bufferInfo *bufInfo)
 {
 	uint32_t temp;
 
-	bs_read_ue (bufInfo);	/* first_mb_in_slice */
-	temp = bs_read_ue (bufInfo);
+	bs_read_ue(bufInfo);	/* first_mb_in_slice */
+	temp = bs_read_ue(bufInfo);
 	dec->slice_type = ((temp > 5) ? (temp - 5) : temp);
 }
 
-static uint8_t h264_parse_nal (h264_decode * dec, bufferInfo * bufInfo)
+uint8_t h264_parse_nal(h264_decode *dec, bufferInfo *bufInfo)
 {
 	uint8_t type = 0;
 
-	h264_check_0s (bufInfo, 1);
-	dec->nal_ref_idc = bs_read_u (bufInfo, 2);
-	dec->nal_unit_type = type = bs_read_u (bufInfo, 5);
+	h264_check_0s(bufInfo, 1);
+	dec->nal_ref_idc = bs_read_u(bufInfo, 2);
+	dec->nal_unit_type = type = bs_read_u(bufInfo, 5);
 	switch (type)
 	{
 	case H264_NAL_TYPE_NON_IDR_SLICE:
 	case H264_NAL_TYPE_IDR_SLICE:
-		h264_slice_header (dec, bufInfo);
+		h264_slice_header(dec, bufInfo);
 		break;
 	case H264_NAL_TYPE_SEQ_PARAM:
-		h264_parse_sequence_parameter_set (dec, bufInfo);
+		h264_parse_sequence_parameter_set(dec, bufInfo);
 		break;
 	case H264_NAL_TYPE_PIC_PARAM:
 	case H264_NAL_TYPE_SEI:
@@ -1167,13 +1062,13 @@ static uint8_t h264_parse_nal (h264_decode * dec, bufferInfo * bufInfo)
 		/* NOP */
 		break;
 	default:
-		printf ("Nal type unknown %d \n ", type);
+		printf("Nal type unknown %d\n", type);
 		break;
 	}
 	return type;
 }
 
-static uint32_t h264_find_next_start_code (uint8_t * pBuf, uint32_t bufLen)
+uint32_t h264_find_next_start_code(uint8_t *pBuf, uint32_t bufLen)
 {
 	uint32_t val;
 	uint32_t offset, startBytes;
@@ -1188,6 +1083,7 @@ static uint32_t h264_find_next_start_code (uint8_t * pBuf, uint32_t bufLen)
 		offset = 3;
 		startBytes = 1;
 	}
+
 	val = 0xffffffff;
 	while (offset < bufLen - 3) {
 		val <<= 8;
@@ -1199,6 +1095,7 @@ static uint32_t h264_find_next_start_code (uint8_t * pBuf, uint32_t bufLen)
 		if ((val & 0x00ffffff) == H264_START_CODE)
 			return offset - 3;
 	}
+
 	if (bufLen - offset <= 3 && startBytes == 0) {
 		startBytes = 0;
 		return 0;
@@ -1217,7 +1114,7 @@ static int verify_checksum(uint8_t *buffer, uint32_t buffer_size)
 	do {
 		uint32_t ret;
 
-		ret = h264_find_next_start_code (buffer + buffer_pos,
+		ret = h264_find_next_start_code(buffer + buffer_pos,
 				 buffer_size - buffer_pos);
 		if (ret == 0) {
 			done = 1;
@@ -1231,13 +1128,13 @@ static int verify_checksum(uint8_t *buffer, uint32_t buffer_size)
 				uint32_t nal_len;
 				bufferInfo bufinfo;
 
-				nal_len = remove_03 (buffer + buffer_pos, ret);
+				nal_len = remove_03(buffer + buffer_pos, ret);
 				bufinfo.decBuffer = buffer + buffer_pos + (buffer[buffer_pos + 2] == 1 ? 3 : 4);
 				bufinfo.decBufferSize = (nal_len - (buffer[buffer_pos + 2] == 1 ? 3 : 4)) * 8;
 				bufinfo.end = buffer + buffer_pos + nal_len;
 				bufinfo.numOfBitsInBuffer = 8;
 				bufinfo.decData = *bufinfo.decBuffer;
-				h264_parse_nal (&dec, &bufinfo);
+				h264_parse_nal(&dec, &bufinfo);
 			}
 			buffer_pos += ret;	/*  buffer_pos points to next code */
 		}
