@@ -57,6 +57,9 @@ amdgpu_create_userqueue(amdgpu_device_handle dev,
 	case AMDGPU_HW_IP_COMPUTE:
 		mqd_size = sizeof(struct drm_amdgpu_userq_mqd_compute_gfx11);
 		break;
+	case AMDGPU_HW_IP_VCN_ENC:
+		mqd_size = sizeof(struct drm_amdgpu_userq_mqd_vcn);
+		break;
 	default:
 		return -EINVAL;
 	}
