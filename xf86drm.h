@@ -56,6 +56,16 @@ extern "C" {
 #define DRM_IOC_READWRITE	_IOC_READ|_IOC_WRITE
 #define DRM_IOC(dir, group, nr, size) _IOC(dir, group, nr, size)
 
+#elif defined(__GNU__)
+#include <mach/port.h>
+#include <hurd/ioctl.h>
+#define DRM_IOCTL_NR(n)         ((n) & 0xff)
+#define DRM_IOC_VOID            IOC_VOID
+#define DRM_IOC_READ            IOC_OUT
+#define DRM_IOC_WRITE           IOC_IN
+#define DRM_IOC_READWRITE       IOC_INOUT
+#define DRM_IOC(dir, group, nr, size) _IOC(dir, group, nr, size)
+
 #else /* One of the *BSDs */
 
 #include <sys/ioccom.h>

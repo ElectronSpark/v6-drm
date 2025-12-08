@@ -41,6 +41,21 @@
 #include <asm/ioctl.h>
 typedef unsigned int drm_handle_t;
 
+#elif   defined(__GNU__)
+#include <sys/types.h>
+#include <sys/ioctl.h>
+#include <mach/i386/ioccom.h>
+typedef __int8_t   __s8;
+typedef __uint8_t  __u8;
+typedef __int16_t  __s16;
+typedef __uint16_t __u16;
+typedef __int32_t  __s32;
+typedef __uint32_t __u32;
+typedef __int64_t  __s64;
+typedef __uint64_t __u64;
+typedef size_t   __kernel_size_t;
+typedef unsigned int drm_handle_t;
+
 #else /* One of the BSDs */
 
 #include <stdint.h>

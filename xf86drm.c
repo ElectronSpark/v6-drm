@@ -101,7 +101,7 @@
 #define DRM_MAJOR 226 /* Linux */
 #endif
 
-#if defined(__OpenBSD__) || defined(__DragonFly__)
+#if defined(__OpenBSD__) || defined(__DragonFly__) || defined(__GNU__)
 struct drm_pciinfo {
 	uint16_t	domain;
 	uint8_t		bus;
@@ -3495,7 +3495,7 @@ static char *drmGetMinorNameForFD(int fd, int type)
     return strdup(name);
 #else
     struct stat sbuf;
-    char buf[PATH_MAX + 1];
+    char *buf = NULL;
     const char *dev_name = drmGetDeviceName(type);
     unsigned int maj, min;
     int n;
@@ -3512,11 +3512,12 @@ static char *drmGetMinorNameForFD(int fd, int type)
     if (!dev_name)
         return NULL;
 
-    n = snprintf(buf, sizeof(buf), dev_name, DRM_DIR_NAME, min);
-    if (n == -1 || n >= sizeof(buf))
+    n = asprintf(&buf, dev_name, DRM_DIR_NAME, min);
+    if (n < 0)
         return NULL;
 
-    return strdup(buf);
+    return buf;
+
 #endif
 }
 
@@ -3636,7 +3637,7 @@ static int drmParseSubsystemType(int maj, int min)
             return DRM_BUS_VIRTIO;
      }
     return subsystem_type;
-#elif defined(__OpenBSD__) || defined(__DragonFly__) || defined(__FreeBSD__)
+#elif defined(__OpenBSD__) || defined(__DragonFly__) || defined(__FreeBSD__) || defined(__GNU__)
     return DRM_BUS_PCI;
 #else
 #warning "Missing implementation of drmParseSubsystemType"
@@ -3744,7 +3745,7 @@ static int drmParsePciBusInfo(int maj, int min, drmPciBusInfoPtr info)
     info->func = func;
 
     return 0;
-#elif defined(__OpenBSD__) || defined(__DragonFly__)
+#elif defined(__OpenBSD__) || defined(__DragonFly__) || defined(__GNU__)
     struct drm_pciinfo pinfo;
     int fd, type;
 
@@ -3915,7 +3916,7 @@ static int drmParsePciDeviceInfo(int maj, int min,
         return parse_config_sysfs_file(maj, min, device);
 
     return 0;
-#elif defined(__OpenBSD__) || defined(__DragonFly__)
+#elif defined(__OpenBSD__) || defined(__DragonFly__) || defined(__GNU__)
     struct drm_pciinfo pinfo;
     int fd, type;
 
@@ -4524,7 +4525,7 @@ process_device(drmDevicePtr *device, const char *d_name,
                bool fetch_deviceinfo, uint32_t flags)
 {
     struct stat sbuf;
-    char node[PATH_MAX + 1];
+    char *node = NULL;
     int node_type, subsystem_type, written;
     unsigned int maj, min;
     const int max_node_length = ALIGN(drmGetMaxNodeName(), sizeof(void *));
@@ -4532,8 +4533,7 @@ process_device(drmDevicePtr *device, const char *d_name,
     node_type = drmGetNodeType(d_name);
     if (node_type < 0)
         return -1;
-
-    written = snprintf(node, PATH_MAX, "%s/%s", DRM_DIR_NAME, d_name);
+    written = asprintf(&node, "%s/%s", DRM_DIR_NAME, d_name);
     if (written < 0)
         return -1;
 
@@ -4940,7 +4940,7 @@ drm_public char *drmGetDeviceNameFromFd2(int fd)
     return drmGetDeviceNameFromFd(fd);
 #else
     struct stat      sbuf;
-    char             node[PATH_MAX + 1];
+    char            *node = NULL;
     const char      *dev_name;
     int              node_type;
     int              maj, min, n;
@@ -4962,11 +4962,11 @@ drm_public char *drmGetDeviceNameFromFd2(int fd)
     if (!dev_name)
         return NULL;
 
-    n = snprintf(node, PATH_MAX, dev_name, DRM_DIR_NAME, min);
-    if (n == -1 || n >= PATH_MAX)
-      return NULL;
+    n = asprintf(&node, dev_name, DRM_DIR_NAME, min);
+    if (n < 0)
+       return NULL;
 
-    return strdup(node);
+    return node;
 #endif
 }
 
