@@ -47,6 +47,15 @@ extern "C" {
 #define DRM_MAX_MINOR   64 /* deprecated */
 #endif
 
+/** Deprecated attribute */
+#if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L) || (defined(__cplusplus) && __cplusplus >= 201402L)
+#define DRM_DEPRECATED [[deprecated]]
+#elif defined(__GNUC__) && __GNUC__ >= 4
+#define DRM_DEPRECATED __attribute__ ((deprecated))
+#else
+#define DRM_DEPRECATED
+#endif
+
 #if defined(__linux__)
 
 #define DRM_IOCTL_NR(n)		_IOC_NR(n)
@@ -68,7 +77,7 @@ extern "C" {
 
 #endif
 
-				/* Defaults, if nothing set in xf86config */
+/* Defaults, if nothing set in xf86config */
 #define DRM_DEV_UID	 0
 #define DRM_DEV_GID	 0
 /* Default /dev/dri directory permissions 0755 */
@@ -118,21 +127,21 @@ typedef void          *drmAddress, **drmAddressPtr; /**< For mapped regions */
 #define DRM_PRINTFLIKE(f, a)
 #endif
 
-typedef struct _drmServerInfo {
+typedef DRM_DEPRECATED struct _drmServerInfo {
   int (*debug_print)(const char *format, va_list ap) DRM_PRINTFLIKE(1,0);
   int (*load_module)(const char *name);
   void (*get_perms)(gid_t *, mode_t *);
 } drmServerInfo, *drmServerInfoPtr;
 
-typedef struct drmHashEntry {
+typedef DRM_DEPRECATED struct drmHashEntry {
     int      fd;
     void     (*f)(int, void *, void *);
     void     *tagTable;
 } drmHashEntry;
 
 extern int drmIoctl(int fd, unsigned long request, void *arg);
-extern void *drmGetHashTable(void);
-extern drmHashEntry *drmGetEntry(int fd);
+extern DRM_DEPRECATED void * drmGetHashTable(void);
+extern DRM_DEPRECATED drmHashEntry * drmGetEntry(int fd);
 
 /**
  * Driver version information.
@@ -144,14 +153,14 @@ typedef struct _drmVersion {
     int     version_minor;        /**< Minor version */
     int     version_patchlevel;   /**< Patch level */
     int     name_len; 	          /**< Length of name buffer */
-    char    *name;	          /**< Name of driver */
+    char    *name;                /**< Name of driver */
     int     date_len;             /**< Length of date buffer */
     char    *date;                /**< User-space buffer to hold date */
     int     desc_len;	          /**< Length of desc buffer */
     char    *desc;                /**< User-space buffer to hold desc */
 } drmVersion, *drmVersionPtr;
 
-typedef struct _drmStats {
+typedef DRM_DEPRECATED struct _drmStats {
     unsigned long count;	     /**< Number of data */
     struct {
 	unsigned long value;	     /**< Value from kernel */
@@ -194,7 +203,7 @@ typedef enum {
 /**
  * \warning These values *MUST* match drm.h
  */
-typedef enum {
+typedef DRM_DEPRECATED enum {
     /** \name Flags for DMA buffer dispatch */
     /*@{*/
     DRM_DMA_BLOCK        = 0x01, /**<
@@ -218,7 +227,7 @@ typedef enum {
     /*@}*/
 } drmDMAFlags;
 
-typedef enum {
+typedef DRM_DEPRECATED enum {
     DRM_PAGE_ALIGN       = 0x01,
     DRM_AGP_BUFFER       = 0x02,
     DRM_SG_BUFFER        = 0x04,
@@ -226,7 +235,7 @@ typedef enum {
     DRM_PCI_BUFFER_RO    = 0x10
 } drmBufDescFlags;
 
-typedef enum {
+typedef DRM_DEPRECATED enum {
     DRM_LOCK_READY      = 0x01, /**< Wait until hardware is ready for DMA */
     DRM_LOCK_QUIESCENT  = 0x02, /**< Wait until hardware quiescent */
     DRM_LOCK_FLUSH      = 0x04, /**< Flush this context's DMA queue first */
@@ -238,25 +247,25 @@ typedef enum {
     DRM_HALT_CUR_QUEUES = 0x20  /**< Halt all current queues */
 } drmLockFlags;
 
-typedef enum {
+typedef DRM_DEPRECATED enum {
     DRM_CONTEXT_PRESERVED = 0x01, /**< This context is preserved and
 				     never swapped. */
     DRM_CONTEXT_2DONLY    = 0x02  /**< This context is for 2D rendering only. */
 } drm_context_tFlags, *drm_context_tFlagsPtr;
 
-typedef struct _drmBufDesc {
+typedef DRM_DEPRECATED struct _drmBufDesc {
     int              count;	  /**< Number of buffers of this size */
     int              size;	  /**< Size in bytes */
     int              low_mark;	  /**< Low water mark */
     int              high_mark;	  /**< High water mark */
 } drmBufDesc, *drmBufDescPtr;
 
-typedef struct _drmBufInfo {
+typedef DRM_DEPRECATED struct _drmBufInfo {
     int              count;	  /**< Number of buffers described in list */
     drmBufDescPtr    list;	  /**< List of buffer descriptions */
 } drmBufInfo, *drmBufInfoPtr;
 
-typedef struct _drmBuf {
+typedef DRM_DEPRECATED struct _drmBuf {
     int              idx;	  /**< Index into the master buffer list */
     int              total;	  /**< Buffer size */
     int              used;	  /**< Amount of buffer in use (for DMA) */
@@ -269,12 +278,12 @@ typedef struct _drmBuf {
  * Used by drmMapBufs() and drmUnmapBufs() to store information about the
  * mapped buffers.
  */
-typedef struct _drmBufMap {
+typedef DRM_DEPRECATED struct _drmBufMap {
     int              count;	  /**< Number of buffers mapped */
     drmBufPtr        list;	  /**< Buffers */
 } drmBufMap, *drmBufMapPtr;
 
-typedef struct _drmLock {
+typedef DRM_DEPRECATED struct _drmLock {
     volatile unsigned int lock;
     char                      padding[60];
     /* This is big enough for most current (and future?) architectures:
@@ -294,7 +303,7 @@ typedef struct _drmLock {
  * Indices here refer to the offset into
  * list in drmBufInfo
  */
-typedef struct _drmDMAReq {
+typedef DRM_DEPRECATED struct _drmDMAReq {
     drm_context_t    context;  	  /**< Context handle */
     int           send_count;     /**< Number of buffers to send */
     int           *send_list;     /**< List of handles to buffers */
@@ -307,21 +316,20 @@ typedef struct _drmDMAReq {
     int           granted_count;  /**< Number of buffers granted at this size */
 } drmDMAReq, *drmDMAReqPtr;
 
-typedef struct _drmRegion {
+typedef DRM_DEPRECATED struct _drmRegion {
     drm_handle_t     handle;
     unsigned int  offset;
     drmSize       size;
     drmAddress    map;
 } drmRegion, *drmRegionPtr;
 
-typedef struct _drmTextureRegion {
+typedef DRM_DEPRECATED struct _drmTextureRegion {
     unsigned char next;
     unsigned char prev;
     unsigned char in_use;
     unsigned char padding;	/**< Explicitly pad this out */
     unsigned int  age;
 } drmTextureRegion, *drmTextureRegionPtr;
-
 
 typedef enum {
     DRM_VBLANK_ABSOLUTE = 0x0,	/**< Wait for specific vblank sequence number */
@@ -354,7 +362,7 @@ typedef union _drmVBlank {
 	drmVBlankReply reply;
 } drmVBlank, *drmVBlankPtr;
 
-typedef struct _drmSetVersion {
+typedef DRM_DEPRECATED struct _drmSetVersion {
 	int drm_di_major;
 	int drm_di_minor;
 	int drm_dd_major;
@@ -369,6 +377,8 @@ typedef struct _drmSetVersion {
 #if defined(__GNUC__) && (__GNUC__ >= 2)
 # if defined(__i386) || defined(__AMD64__) || defined(__x86_64__) || defined(__amd64__)
 				/* Reflect changes here to drmP.h */
+
+/* deprecated */			
 #define DRM_CAS(lock,old,new,__ret)                                    \
 	do {                                                           \
                 int __dummy;	/* Can't mark eax as clobbered */      \
@@ -383,7 +393,8 @@ typedef struct _drmSetVersion {
 	} while (0)
 
 #elif defined(__alpha__)
-
+ 
+/* deprecated */
 #define	DRM_CAS(lock, old, new, ret)		\
 	do {					\
 		int tmp, old32;			\
@@ -409,6 +420,7 @@ typedef struct _drmSetVersion {
 
 #elif defined(__sparc__)
 
+/* deprecated */
 #define DRM_CAS(lock,old,new,__ret)				\
 do {	register unsigned int __old __asm("o0");		\
 	register unsigned int __new __asm("o1");		\
@@ -435,6 +447,7 @@ do {	register unsigned int __old __asm("o0");		\
 /* this currently generates bad code (missing stop bits)... */
 #include <ia64intrin.h>
 
+/* deprecated */
 #define DRM_CAS(lock,old,new,__ret)					      \
 	do {								      \
 		unsigned long __result, __old = (old) & 0xffffffff;		\
@@ -447,6 +460,8 @@ do {	register unsigned int __old __asm("o0");		\
 	} while (0)
 
 #else
+
+/* deprecated */
 #define DRM_CAS(lock,old,new,__ret)					  \
 	do {								  \
 		unsigned int __result, __old = (old);			  \
@@ -465,6 +480,7 @@ do {	register unsigned int __old __asm("o0");		\
 
 #elif defined(__powerpc__)
 
+/* deprecated */
 #define DRM_CAS(lock,old,new,__ret)			\
 	do {						\
 		__asm__ __volatile__(			\
@@ -487,30 +503,33 @@ do {	register unsigned int __old __asm("o0");		\
 	|| defined (__ARM_ARCH_7__) || defined(__ARM_ARCH_7A__) \
 	|| defined(__ARM_ARCH_7R__) || defined(__ARM_ARCH_7M__) \
 	|| defined(__ARM_ARCH_7EM__)
-       /* excluding ARMv4/ARMv5 and lower (lacking ldrex/strex support) */
-       #undef DRM_DEV_MODE
-       #define DRM_DEV_MODE     (S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH)
+		/* excluding ARMv4/ARMv5 and lower (lacking ldrex/strex support) */
+		#undef DRM_DEV_MODE
+		#define DRM_DEV_MODE     (S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH)
 
-       #define DRM_CAS(lock,old,new,__ret)             \
-       do {                                            \
-               __asm__ __volatile__ (                  \
-                       "1: ldrex %0, [%1]\n"           \
-                       "   teq %0, %2\n"               \
-                       "   ite eq\n"                   \
-                       "   strexeq %0, %3, [%1]\n"     \
-                       "   movne   %0, #1\n"           \
-               : "=&r" (__ret)                         \
-               : "r" (lock), "r" (old), "r" (new)      \
-               : "cc","memory");                       \
-       } while (0)
+		/* deprecated */
+		#define DRM_CAS(lock,old,new,__ret)             \
+		do {                                            \
+				__asm__ __volatile__ (                  \
+						"1: ldrex %0, [%1]\n"           \
+						"   teq %0, %2\n"               \
+						"   ite eq\n"                   \
+						"   strexeq %0, %3, [%1]\n"     \
+						"   movne   %0, #1\n"           \
+				: "=&r" (__ret)                         \
+				: "r" (lock), "r" (old), "r" (new)      \
+				: "cc","memory");                       \
+		} while (0)
 
 #endif /* architecture */
 #endif /* __GNUC__ >= 2 */
 
+/* deprecated */
 #ifndef DRM_CAS
 #define DRM_CAS(lock,old,new,ret) do { ret=1; } while (0) /* FAST LOCK FAILS */
 #endif
 
+/* deprecated */
 #if defined(__alpha__)
 #define DRM_CAS_RESULT(_result)		long _result
 #elif defined(__powerpc__)
@@ -519,6 +538,7 @@ do {	register unsigned int __old __asm("o0");		\
 #define DRM_CAS_RESULT(_result)		char _result
 #endif
 
+/* deprecated */
 #define DRM_LIGHT_LOCK(fd,lock,context)                                \
 	do {                                                           \
                 DRM_CAS_RESULT(__ret);                                 \
@@ -526,8 +546,7 @@ do {	register unsigned int __old __asm("o0");		\
                 if (__ret) drmGetLock(fd,context,0);                   \
         } while(0)
 
-				/* This one counts fast locks -- for
-                                   benchmarking only. */
+/* deprecated */
 #define DRM_LIGHT_LOCK_COUNT(fd,lock,context,count)                    \
 	do {                                                           \
                 DRM_CAS_RESULT(__ret);                                 \
@@ -536,12 +555,14 @@ do {	register unsigned int __old __asm("o0");		\
                 else       ++count;                                    \
         } while(0)
 
+/* deprecated */
 #define DRM_LOCK(fd,lock,context,flags)                                \
 	do {                                                           \
 		if (flags) drmGetLock(fd,context,flags);               \
 		else       DRM_LIGHT_LOCK(fd,lock,context);            \
 	} while(0)
 
+/* deprecated */
 #define DRM_UNLOCK(fd,lock,context)                                    \
 	do {                                                           \
                 DRM_CAS_RESULT(__ret);                                 \
@@ -549,7 +570,7 @@ do {	register unsigned int __old __asm("o0");		\
                 if (__ret) drmUnlock(fd,context);                      \
         } while(0)
 
-				/* Simple spin locks */
+/* deprecated */
 #define DRM_SPINLOCK(spin,val)                                         \
 	do {                                                           \
             DRM_CAS_RESULT(__ret);                                     \
@@ -559,6 +580,7 @@ do {	register unsigned int __old __asm("o0");		\
 	    } while (__ret);                                           \
 	} while(0)
 
+/* deprecated */
 #define DRM_SPINLOCK_TAKE(spin,val)                                    \
 	do {                                                           \
             DRM_CAS_RESULT(__ret);                                     \
@@ -569,6 +591,7 @@ do {	register unsigned int __old __asm("o0");		\
 	    } while (__ret);                                           \
 	} while(0)
 
+/* deprecated */
 #define DRM_SPINLOCK_COUNT(spin,val,count,__ret)                       \
 	do {                                                           \
             int  __i;                                                  \
@@ -579,6 +602,7 @@ do {	register unsigned int __old __asm("o0");		\
 	    }                                                          \
 	} while(0)
 
+/* deprecated */
 #define DRM_SPINUNLOCK(spin,val)                                       \
 	do {                                                           \
             DRM_CAS_RESULT(__ret);                                     \
@@ -592,183 +616,183 @@ do {	register unsigned int __old __asm("o0");		\
 
 
 /* General user-level programmer's API: unprivileged */
-extern int           drmAvailable(void);
-extern int           drmOpen(const char *name, const char *busid);
+extern DRM_DEPRECATED int       drmAvailable(void);
+extern DRM_DEPRECATED int       drmOpen(const char *name, const char *busid);
 
 #define DRM_NODE_PRIMARY 0
-#define DRM_NODE_CONTROL 1 /* deprecated: never returned */
+#define DRM_NODE_CONTROL 1 DRM_DEPRECATED /* never returned */
 #define DRM_NODE_RENDER  2
 #define DRM_NODE_MAX     3
 
-extern int           drmOpenWithType(const char *name, const char *busid,
-                                     int type);
-
-extern int           drmOpenControl(int minor); /* deprecated: always fails */
-extern int           drmOpenRender(int minor);
-extern int           drmClose(int fd);
-extern drmVersionPtr drmGetVersion(int fd);
-extern drmVersionPtr drmGetLibVersion(int fd);
-extern int           drmGetCap(int fd, uint64_t capability, uint64_t *value);
-extern void          drmFreeVersion(drmVersionPtr);
-extern int           drmGetMagic(int fd, drm_magic_t * magic);
-extern char          *drmGetBusid(int fd);
-extern int           drmGetInterruptFromBusID(int fd, int busnum, int devnum,
-					      int funcnum);
-extern int           drmGetMap(int fd, int idx, drm_handle_t *offset,
-			       drmSize *size, drmMapType *type,
-			       drmMapFlags *flags, drm_handle_t *handle,
-			       int *mtrr);
-extern int           drmGetClient(int fd, int idx, int *auth, int *pid,
-				  int *uid, unsigned long *magic,
-				  unsigned long *iocs);
-extern int           drmGetStats(int fd, drmStatsT *stats);
-extern int           drmSetInterfaceVersion(int fd, drmSetVersion *version);
-extern int           drmCommandNone(int fd, unsigned long drmCommandIndex);
-extern int           drmCommandRead(int fd, unsigned long drmCommandIndex,
-                                    void *data, unsigned long size);
-extern int           drmCommandWrite(int fd, unsigned long drmCommandIndex,
-                                     void *data, unsigned long size);
-extern int           drmCommandWriteRead(int fd, unsigned long drmCommandIndex,
-                                         void *data, unsigned long size);
+extern DRM_DEPRECATED int       drmOpenWithType(const char *name, const char *busid,
+                                          			int type);
+extern DRM_DEPRECATED int       drmOpenControl(int minor); /* always fails */
+extern DRM_DEPRECATED int       drmOpenRender(int minor);
+extern DRM_DEPRECATED int       drmClose(int fd);
+extern drmVersionPtr    drmGetVersion(int fd);
+extern drmVersionPtr    drmGetLibVersion(int fd);
+extern int              drmGetCap(int fd, uint64_t capability, uint64_t *value);
+extern void             drmFreeVersion(drmVersionPtr);
+extern DRM_DEPRECATED int       drmGetMagic(int fd, drm_magic_t *magic);
+extern DRM_DEPRECATED char *    drmGetBusid(int fd);
+extern DRM_DEPRECATED int       drmGetInterruptFromBusID(int fd, int busnum,
+						  				int devnum, int funcnum);
+extern int              drmGetMap(int fd, int idx, drm_handle_t *offset,
+							drmSize *size, drmMapType *type,
+							drmMapFlags *flags, drm_handle_t *handle,
+							int *mtrr);
+extern DRM_DEPRECATED int       drmGetClient(int fd, int idx, int *auth,
+										int *pid, int *uid, unsigned long *magic,
+										unsigned long *iocs); 
+extern DRM_DEPRECATED int       drmGetStats(int fd, drmStatsT *stats);
+extern DRM_DEPRECATED int       drmSetInterfaceVersion(int fd, drmSetVersion *version);
+extern DRM_DEPRECATED int       drmCommandNone(int fd, unsigned long drmCommandIndex);
+extern DRM_DEPRECATED int       drmCommandRead(int fd, unsigned long drmCommandIndex,
+                                    				void *data, unsigned long size);
+extern DRM_DEPRECATED int       drmCommandWrite(int fd, unsigned long drmCommandIndex,
+                                     				void *data, unsigned long size);
+extern DRM_DEPRECATED int       drmCommandWriteRead(int fd, unsigned long drmCommandIndex,
+                                         				void *data, unsigned long size);
 
 /* General user-level programmer's API: X server (root) only  */
-extern void          drmFreeBusid(const char *busid);
-extern int           drmSetBusid(int fd, const char *busid);
-extern int           drmAuthMagic(int fd, drm_magic_t magic);
-extern int           drmAddMap(int fd,
-			       drm_handle_t offset,
-			       drmSize size,
-			       drmMapType type,
-			       drmMapFlags flags,
-			       drm_handle_t * handle);
-extern int	     drmRmMap(int fd, drm_handle_t handle);
-extern int	     drmAddContextPrivateMapping(int fd, drm_context_t ctx_id,
-						 drm_handle_t handle);
+extern DRM_DEPRECATED void      drmFreeBusid(const char *busid);
+extern DRM_DEPRECATED int       drmSetBusid(int fd, const char *busid);
+extern DRM_DEPRECATED int       drmAuthMagic(int fd, drm_magic_t magic);
+extern int                      drmAddMap(int fd,
+										drm_handle_t offset,
+										drmSize size,
+										drmMapType type,
+										drmMapFlags flags,
+										drm_handle_t * handle);
+extern int                      drmRmMap(int fd, drm_handle_t handle);
+extern DRM_DEPRECATED int       drmAddContextPrivateMapping(int fd, drm_context_t ctx_id,
+						 				drm_handle_t handle);
 
-extern int           drmAddBufs(int fd, int count, int size,
-				drmBufDescFlags flags,
-				int agp_offset);
-extern int           drmMarkBufs(int fd, double low, double high);
-extern int           drmCreateContext(int fd, drm_context_t * handle);
-extern int           drmSetContextFlags(int fd, drm_context_t context,
-					drm_context_tFlags flags);
-extern int           drmGetContextFlags(int fd, drm_context_t context,
-					drm_context_tFlagsPtr flags);
-extern int           drmAddContextTag(int fd, drm_context_t context, void *tag);
-extern int           drmDelContextTag(int fd, drm_context_t context);
-extern void          *drmGetContextTag(int fd, drm_context_t context);
-extern drm_context_t * drmGetReservedContextList(int fd, int *count);
-extern void          drmFreeReservedContextList(drm_context_t *);
-extern int           drmSwitchToContext(int fd, drm_context_t context);
-extern int           drmDestroyContext(int fd, drm_context_t handle);
-extern int           drmCreateDrawable(int fd, drm_drawable_t * handle);
-extern int           drmDestroyDrawable(int fd, drm_drawable_t handle);
-extern int           drmUpdateDrawableInfo(int fd, drm_drawable_t handle,
-					   drm_drawable_info_type_t type,
-					   unsigned int num, void *data);
-extern int           drmCtlInstHandler(int fd, int irq);
-extern int           drmCtlUninstHandler(int fd);
-extern int           drmSetClientCap(int fd, uint64_t capability,
-				     uint64_t value);
+extern DRM_DEPRECATED int       drmAddBufs(int fd, int count, int size,
+										drmBufDescFlags flags,
+										int agp_offset);
+extern DRM_DEPRECATED int       drmMarkBufs(int fd, double low, double high);
+extern DRM_DEPRECATED int       drmCreateContext(int fd, drm_context_t * handle);
+extern DRM_DEPRECATED int       drmSetContextFlags(int fd, drm_context_t context,
+										drm_context_tFlags flags);
+extern DRM_DEPRECATED int       drmGetContextFlags(int fd, drm_context_t context,
+										drm_context_tFlagsPtr flags);
+extern DRM_DEPRECATED int       drmAddContextTag(int fd, drm_context_t context, void *tag);
+extern DRM_DEPRECATED int       drmDelContextTag(int fd, drm_context_t context);
+extern DRM_DEPRECATED void *    drmGetContextTag(int fd, drm_context_t context);
+extern DRM_DEPRECATED drm_context_t * drmGetReservedContextList(int fd, int *count);
+extern DRM_DEPRECATED void      drmFreeReservedContextList(drm_context_t *);
+extern DRM_DEPRECATED int       drmSwitchToContext(int fd, drm_context_t context);
+extern DRM_DEPRECATED int       drmDestroyContext(int fd, drm_context_t handle);
+extern DRM_DEPRECATED int       drmCreateDrawable(int fd, drm_drawable_t * handle);
+extern DRM_DEPRECATED int       drmDestroyDrawable(int fd, drm_drawable_t handle);
+extern DRM_DEPRECATED int       drmUpdateDrawableInfo(int fd, drm_drawable_t handle,
+									   drm_drawable_info_type_t type,
+									   unsigned int num, void *data);
+extern DRM_DEPRECATED int       drmCtlInstHandler(int fd, int irq);
+extern DRM_DEPRECATED int       drmCtlUninstHandler(int fd);
+extern int              drmSetClientCap(int fd, uint64_t capability,
+				     		uint64_t value);
 
-extern int           drmCrtcGetSequence(int fd, uint32_t crtcId,
-					uint64_t *sequence, uint64_t *ns);
-extern int           drmCrtcQueueSequence(int fd, uint32_t crtcId,
-					  uint32_t flags, uint64_t sequence,
-					  uint64_t *sequence_queued,
-					  uint64_t user_data);
+extern DRM_DEPRECATED int           drmCrtcGetSequence(int fd, uint32_t crtcId,
+										uint64_t *sequence, uint64_t *ns);
+extern DRM_DEPRECATED int           drmCrtcQueueSequence(int fd, uint32_t crtcId,
+										uint32_t flags, uint64_t sequence,
+									  	uint64_t *sequence_queued,
+									  	uint64_t user_data);
+
 /* General user-level programmer's API: authenticated client and/or X */
-extern int           drmMap(int fd,
-			    drm_handle_t handle,
-			    drmSize size,
-			    drmAddressPtr address);
-extern int           drmUnmap(drmAddress address, drmSize size);
-extern drmBufInfoPtr drmGetBufInfo(int fd);
-extern drmBufMapPtr  drmMapBufs(int fd);
-extern int           drmUnmapBufs(drmBufMapPtr bufs);
-extern int           drmDMA(int fd, drmDMAReqPtr request);
-extern int           drmFreeBufs(int fd, int count, int *list);
-extern int           drmGetLock(int fd,
-			        drm_context_t context,
-			        drmLockFlags flags);
-extern int           drmUnlock(int fd, drm_context_t context);
-extern int           drmFinish(int fd, int context, drmLockFlags flags);
-extern int	     drmGetContextPrivateMapping(int fd, drm_context_t ctx_id,
-						 drm_handle_t * handle);
+extern DRM_DEPRECATED int           drmMap(int fd,
+									    drm_handle_t handle,
+									    drmSize size,
+									    drmAddressPtr address);
+extern DRM_DEPRECATED int           drmUnmap(drmAddress address, drmSize size);
+extern DRM_DEPRECATED drmBufInfoPtr drmGetBufInfo(int fd);
+extern DRM_DEPRECATED drmBufMapPtr  drmMapBufs(int fd);
+extern DRM_DEPRECATED int           drmUnmapBufs(drmBufMapPtr bufs);
+extern DRM_DEPRECATED int           drmDMA(int fd, drmDMAReqPtr request);
+extern DRM_DEPRECATED int           drmFreeBufs(int fd, int count, int *list);
+extern DRM_DEPRECATED int           drmGetLock(int fd,
+								        drm_context_t context,
+								        drmLockFlags flags);
+extern DRM_DEPRECATED int        drmUnlock(int fd, drm_context_t context);
+extern DRM_DEPRECATED int        drmFinish(int fd, int context, drmLockFlags flags);
+extern DRM_DEPRECATED int        drmGetContextPrivateMapping(int fd, drm_context_t ctx_id,
+										drm_handle_t * handle);
 
 /* AGP/GART support: X server (root) only */
-extern int           drmAgpAcquire(int fd);
-extern int           drmAgpRelease(int fd);
-extern int           drmAgpEnable(int fd, unsigned long mode);
-extern int           drmAgpAlloc(int fd, unsigned long size,
-				 unsigned long type, unsigned long *address,
-				 drm_handle_t *handle);
-extern int           drmAgpFree(int fd, drm_handle_t handle);
-extern int 	     drmAgpBind(int fd, drm_handle_t handle,
-				unsigned long offset);
-extern int           drmAgpUnbind(int fd, drm_handle_t handle);
+extern DRM_DEPRECATED int        drmAgpAcquire(int fd);
+extern DRM_DEPRECATED int        drmAgpRelease(int fd);
+extern DRM_DEPRECATED int        drmAgpEnable(int fd, unsigned long mode);
+extern DRM_DEPRECATED int        drmAgpAlloc(int fd, unsigned long size,
+										unsigned long type, unsigned long *address,
+										drm_handle_t *handle);
+extern DRM_DEPRECATED int        drmAgpFree(int fd, drm_handle_t handle);
+extern DRM_DEPRECATED int        drmAgpBind(int fd, drm_handle_t handle,
+										unsigned long offset);
+extern DRM_DEPRECATED int        drmAgpUnbind(int fd, drm_handle_t handle);
 
 /* AGP/GART info: authenticated client and/or X */
-extern int           drmAgpVersionMajor(int fd);
-extern int           drmAgpVersionMinor(int fd);
-extern unsigned long drmAgpGetMode(int fd);
-extern unsigned long drmAgpBase(int fd); /* Physical location */
-extern unsigned long drmAgpSize(int fd); /* Bytes */
-extern unsigned long drmAgpMemoryUsed(int fd);
-extern unsigned long drmAgpMemoryAvail(int fd);
-extern unsigned int  drmAgpVendorId(int fd);
-extern unsigned int  drmAgpDeviceId(int fd);
+extern DRM_DEPRECATED int           drmAgpVersionMajor(int fd);
+extern DRM_DEPRECATED int           drmAgpVersionMinor(int fd);
+extern DRM_DEPRECATED unsigned long drmAgpGetMode(int fd);
+extern DRM_DEPRECATED unsigned long drmAgpBase(int fd);
+extern DRM_DEPRECATED unsigned long drmAgpSize(int fd);
+extern DRM_DEPRECATED unsigned long drmAgpMemoryUsed(int fd);
+extern DRM_DEPRECATED unsigned long drmAgpMemoryAvail(int fd);
+extern DRM_DEPRECATED unsigned int  drmAgpVendorId(int fd);
+extern DRM_DEPRECATED unsigned int  drmAgpDeviceId(int fd);
 
 /* PCI scatter/gather support: X server (root) only */
-extern int           drmScatterGatherAlloc(int fd, unsigned long size,
-					   drm_handle_t *handle);
-extern int           drmScatterGatherFree(int fd, drm_handle_t handle);
+extern DRM_DEPRECATED int       drmScatterGatherAlloc(int fd, unsigned long size,
+					  					drm_handle_t *handle);
+extern DRM_DEPRECATED int       drmScatterGatherFree(int fd, drm_handle_t handle);
 
-extern int           drmWaitVBlank(int fd, drmVBlankPtr vbl);
+extern int              drmWaitVBlank(int fd, drmVBlankPtr vbl);
 
 /* Support routines */
-extern void          drmSetServerInfo(drmServerInfoPtr info);
-extern int           drmError(int err, const char *label);
-extern void          *drmMalloc(int size);
-extern void          drmFree(void *pt);
+extern DRM_DEPRECATED void       drmSetServerInfo(drmServerInfoPtr info);
+extern DRM_DEPRECATED int        drmError(int err, const char *label);
+extern DRM_DEPRECATED void *     drmMalloc(int size);
+extern DRM_DEPRECATED void       drmFree(void *pt);
 
 /* Hash table routines */
-extern void *drmHashCreate(void);
-extern int  drmHashDestroy(void *t);
-extern int  drmHashLookup(void *t, unsigned long key, void **value);
-extern int  drmHashInsert(void *t, unsigned long key, void *value);
-extern int  drmHashDelete(void *t, unsigned long key);
-extern int  drmHashFirst(void *t, unsigned long *key, void **value);
-extern int  drmHashNext(void *t, unsigned long *key, void **value);
+extern DRM_DEPRECATED void *     drmHashCreate(void);
+extern DRM_DEPRECATED int        drmHashDestroy(void *t);
+extern DRM_DEPRECATED int        drmHashLookup(void *t, unsigned long key, void **value);
+extern DRM_DEPRECATED int        drmHashInsert(void *t, unsigned long key, void *value);
+extern DRM_DEPRECATED int        drmHashDelete(void *t, unsigned long key);
+extern DRM_DEPRECATED int        drmHashFirst(void *t, unsigned long *key, void **value);
+extern DRM_DEPRECATED int        drmHashNext(void *t, unsigned long *key, void **value);
 
 /* PRNG routines */
-extern void          *drmRandomCreate(unsigned long seed);
-extern int           drmRandomDestroy(void *state);
-extern unsigned long drmRandom(void *state);
-extern double        drmRandomDouble(void *state);
+extern DRM_DEPRECATED void *        drmRandomCreate(unsigned long seed);
+extern DRM_DEPRECATED int           drmRandomDestroy(void *state);
+extern DRM_DEPRECATED unsigned long drmRandom(void *state);
+extern DRM_DEPRECATED double        drmRandomDouble(void *state);
 
 /* Skip list routines */
 
-extern void *drmSLCreate(void);
-extern int  drmSLDestroy(void *l);
-extern int  drmSLLookup(void *l, unsigned long key, void **value);
-extern int  drmSLInsert(void *l, unsigned long key, void *value);
-extern int  drmSLDelete(void *l, unsigned long key);
-extern int  drmSLNext(void *l, unsigned long *key, void **value);
-extern int  drmSLFirst(void *l, unsigned long *key, void **value);
-extern void drmSLDump(void *l);
-extern int  drmSLLookupNeighbors(void *l, unsigned long key,
-				 unsigned long *prev_key, void **prev_value,
-				 unsigned long *next_key, void **next_value);
+extern DRM_DEPRECATED void *    drmSLCreate(void);
+extern DRM_DEPRECATED int       drmSLDestroy(void *l);
+extern DRM_DEPRECATED int       drmSLLookup(void *l, unsigned long key, void **value);
+extern DRM_DEPRECATED int       drmSLInsert(void *l, unsigned long key, void *value);
+extern DRM_DEPRECATED int       drmSLDelete(void *l, unsigned long key);
+extern DRM_DEPRECATED int       drmSLNext(void *l, unsigned long *key, void **value);
+extern DRM_DEPRECATED int       drmSLFirst(void *l, unsigned long *key, void **value);
+extern DRM_DEPRECATED void      drmSLDump(void *l);
+extern DRM_DEPRECATED int       drmSLLookupNeighbors(void *l, unsigned long key,
+										unsigned long *prev_key, void **prev_value,
+										unsigned long *next_key, void **next_value);
 
-extern int drmOpenOnce(void *unused, const char *BusID, int *newlyopened);
-extern int drmOpenOnceWithType(const char *BusID, int *newlyopened, int type);
-extern void drmCloseOnce(int fd);
-extern void drmMsg(const char *format, ...) DRM_PRINTFLIKE(1, 2);
+extern DRM_DEPRECATED int       drmOpenOnce(void *unused, const char *BusID, int *newlyopened);
+extern DRM_DEPRECATED int       drmOpenOnceWithType(const char *BusID, int *newlyopened, int type);
+extern DRM_DEPRECATED void      drmCloseOnce(int fd);
+extern DRM_DEPRECATED void      drmMsg(const char *format, ...) DRM_PRINTFLIKE(1, 2);
 
-extern int drmSetMaster(int fd);
-extern int drmDropMaster(int fd);
-extern int drmIsMaster(int fd);
+extern DRM_DEPRECATED int        drmSetMaster(int fd);
+extern DRM_DEPRECATED int        drmDropMaster(int fd);
+extern int              drmIsMaster(int fd);
 
 #define DRM_EVENT_CONTEXT_VERSION 4
 
