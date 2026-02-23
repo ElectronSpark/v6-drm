@@ -1363,8 +1363,14 @@ struct _drmModeAtomicReqItem {
 struct _drmModeAtomicReq {
 	uint32_t cursor;
 	uint32_t size_items;
+	struct drm_mode_atomic_err_code *err_code_ptr;
 	drmModeAtomicReqItemPtr items;
 };
+
+drm_public const struct drm_mode_atomic_err_code * drmModeAtomicGetErrorCode(drmModeAtomicReqPtr req)
+{
+	return req->err_code_ptr;
+}
 
 drm_public drmModeAtomicReqPtr drmModeAtomicAlloc(void)
 {
@@ -1377,6 +1383,9 @@ drm_public drmModeAtomicReqPtr drmModeAtomicAlloc(void)
 	req->items = NULL;
 	req->cursor = 0;
 	req->size_items = 0;
+	req->err_code_ptr = drmMalloc(sizeof(struct drm_mode_atomic_err_code));
+	if (!req->err_code_ptr)
+		return NULL;
 
 	return req;
 }
@@ -1395,9 +1404,21 @@ drm_public drmModeAtomicReqPtr drmModeAtomicDuplicate(const drmModeAtomicReqPtr 
 	new->cursor = old->cursor;
 	new->size_items = old->size_items;
 
+	if (old->err_code_ptr) {
+		new->err_code_ptr = drmMalloc(sizeof(struct drm_mode_atomic_err_code));
+		if (!new->err_code_ptr) {
+			free(new);
+			return NULL;
+		}
+		memcpy(new->err_code_ptr, old->err_code_ptr, sizeof(struct drm_mode_atomic_err_code));
+	} else
+		new->err_code_ptr = NULL;
+
 	if (old->size_items) {
 		new->items = drmMalloc(old->size_items * sizeof(*new->items));
 		if (!new->items) {
+			if (new->err_code_ptr)
+				free(new->err_code_ptr);
 			free(new);
 			return NULL;
 		}
@@ -1440,6 +1461,10 @@ drm_public int drmModeAtomicMerge(drmModeAtomicReqPtr base,
 	for (i = base->cursor; i < base->cursor + augment->cursor; i++)
 		base->items[i].cursor = i;
 	base->cursor += augment->cursor;
+
+	if (base->err_code_ptr)
+		memcpy(base->err_code_ptr, augment->err_code_ptr,
+		       sizeof(struct drm_mode_atomic_err_code));
 
 	return 0;
 }
@@ -1497,6 +1522,10 @@ drm_public void drmModeAtomicFree(drmModeAtomicReqPtr req)
 
 	if (req->items)
 		drmFree(req->items);
+	if (req->err_code_ptr) {
+		drmFree(req->err_code_ptr);
+	}
+
 	drmFree(req);
 }
 
@@ -1518,6 +1547,7 @@ drm_public int drmModeAtomicCommit(int fd, const drmModeAtomicReqPtr req,
 {
 	drmModeAtomicReqPtr sorted;
 	struct drm_mode_atomic atomic;
+	uint64_t err_reporting = 0;
 	uint32_t *objs_ptr = NULL;
 	uint32_t *count_props_ptr = NULL;
 	uint32_t *props_ptr = NULL;
@@ -1609,8 +1639,15 @@ drm_public int drmModeAtomicCommit(int fd, const drmModeAtomicReqPtr req,
 	atomic.prop_values_ptr = VOID2U64(prop_values_ptr);
 	atomic.user_data = VOID2U64(user_data);
 
-	ret = DRM_IOCTL(fd, DRM_IOCTL_MODE_ATOMIC, &atomic);
+	/* TODO: This capability has to read on init once and retrived on each commit */
+	/* Check if atomic error reporting is available */
+	drmGetCap(fd, DRM_CAP_ATOMIC_ERROR_REPORTING, &err_reporting);
+	if (err_reporting)
+		atomic.reserved = (uintptr_t)req->err_code_ptr;
+	else
+		atomic.reserved = 0;
 
+	ret = DRM_IOCTL(fd, DRM_IOCTL_MODE_ATOMIC, &atomic);
 out:
 	drmFree(objs_ptr);
 	drmFree(count_props_ptr);
