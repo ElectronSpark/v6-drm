@@ -24,18 +24,20 @@
  * Authors: Rickard E. (Rik) Faith <faith@valinux.com>
  */
 
+#include "xf86drm.h"
+
 #define HASH_SIZE  512		/* Good for about 100 entries */
 				/* If you change this value, you probably
                                    have to change the HashHash hashing
                                    function! */
 
-typedef struct HashBucket {
+typedef DRM_DEPRECATED struct HashBucket {
     unsigned long     key;
     void              *value;
     struct HashBucket *next;
 } HashBucket, *HashBucketPtr;
 
-typedef struct HashTable {
+typedef DRM_DEPRECATED struct HashTable {
     unsigned long    magic;
     unsigned long    entries;
     unsigned long    hits;	/* At top of linked list */

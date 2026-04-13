@@ -46,6 +46,8 @@ extern "C" {
 #include <stddef.h>
 #include <stdint.h>
 
+#include "xf86drm.h"
+
 /*
  * This is the interface for modesetting for drm.
  *
@@ -403,13 +405,13 @@ extern uint32_t drmModeConnectorGetPossibleCrtcs(int fd,
 /**
  * Attaches the given mode to an connector.
  */
-extern int drmModeAttachMode(int fd, uint32_t connectorId, drmModeModeInfoPtr mode_info);
+extern DRM_DEPRECATED int drmModeAttachMode(int fd, uint32_t connectorId, drmModeModeInfoPtr mode_info);
 
 /**
  * Detaches a mode from the connector
  * must be unused, by the given mode.
  */
-extern int drmModeDetachMode(int fd, uint32_t connectorId, drmModeModeInfoPtr mode_info);
+extern DRM_DEPRECATED int drmModeDetachMode(int fd, uint32_t connectorId, drmModeModeInfoPtr mode_info);
 
 extern drmModePropertyPtr drmModeGetProperty(int fd, uint32_t propertyId);
 extern void drmModeFreeProperty(drmModePropertyPtr ptr);
