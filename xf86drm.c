@@ -68,6 +68,11 @@
 #include <sys/pciio.h>
 #endif
 
+#if defined(__QNX__)
+#include <sys/neutrino.h>
+#include <sys/rsrcdbmgr.h>
+#endif /* __QNX__ */
+
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
 /* Not all systems have MAP_FAILED defined */
@@ -101,6 +106,13 @@
 #define DRM_MAJOR 226 /* Linux */
 #endif
 
+#if defined(__QNX__)
+/* In QNX we have only 64 majors and 1024 minors, so all majors are dynamic, no fixed one */
+#define LINUX_DRM_MAJOR 226 /* Linux */
+#undef DRM_MAJOR
+int DRM_MAJOR = -1;
+#endif /* __QNX__ */
+
 #if defined(__OpenBSD__) || defined(__DragonFly__)
 struct drm_pciinfo {
 	uint16_t	domain;
@@ -125,6 +137,9 @@ static drmServerInfoPtr drm_server_info;
 
 static bool drmNodeIsDRM(int maj, int min);
 static char *drmGetMinorNameForFD(int fd, int type);
+#if defined(__QNX__)
+static void drmQNXResolveMajor(void);
+#endif /* __QNX__ */
 
 #define DRM_MODIFIER(v, f, f_name) \
        .modifier = DRM_FORMAT_MOD_##v ## _ ##f, \
@@ -201,6 +216,149 @@ static const struct drmFormatVendorModifierInfo arm_mode_value_table[] = {
     { AFBC_FORMAT_MOD_BCH,          "BCH" },
     { AFBC_FORMAT_MOD_USM,          "USM" },
 };
+
+#if defined(__QNX__)
+static void drmQNXResolveMajor(void)
+{
+    if (DRM_MAJOR == -1) {
+        struct stat statbuf;
+
+        if (stat("/dev/dri/card0", &statbuf) == 0) {
+            /* Check major of this device */
+            if (S_ISCHR(statbuf.st_mode)) {
+                DRM_MAJOR = major(statbuf.st_rdev);
+            }
+        }
+    }
+}
+
+/* QNX, even the latest 8.0.5 do not have memstream functions */
+
+struct qnx_memstream
+{
+    FILE* file;
+    char **bufp;
+    size_t *sizep;
+};
+
+static FILE* qnx_memstream_open(struct qnx_memstream *mem, char **bufp, size_t *sizep);
+static void qnx_memstream_close(struct qnx_memstream *mem);
+
+static FILE* qnx_memstream_open(struct qnx_memstream *mem, char **bufp, size_t *sizep)
+{
+    int fd;
+    FILE* retfile = NULL;
+
+    /* Create anonymous growable object in the shared memory */
+    fd = shm_open(SHM_ANON, O_CREAT | O_RDWR, 0644);
+    if (fd > 0) {
+        retfile = fdopen(fd, "w");
+        if (retfile != NULL) {
+            mem->file = retfile;
+            mem->bufp = bufp;
+            mem->sizep = sizep;
+        } else {
+            close(fd);
+        }
+    }
+
+    return retfile;
+}
+
+static void qnx_memstream_close(struct qnx_memstream *mem)
+{
+    struct stat st;
+    void* tempbuf;
+
+    fflush(mem->file);
+
+    *mem->bufp = NULL;
+    *mem->sizep = 0;
+
+    if (fstat(fileno(mem->file), &st) == 0) {
+        if (st.st_size > 0) {
+            *mem->bufp = malloc(st.st_size + 1);
+            if (*mem->bufp) {
+                tempbuf = mmap(0, st.st_size, PROT_READ, MAP_PRIVATE, fileno(mem->file), 0);
+                if (tempbuf != MAP_FAILED) {
+                    *mem->sizep = st.st_size + 1;
+                    memcpy(*mem->bufp, tempbuf, st.st_size);
+                    (*mem->bufp)[st.st_size] = 0;
+                    munmap(tempbuf, st.st_size);
+                } else {
+                    free(*mem->bufp);
+                    *mem->bufp = NULL;
+                }
+            }
+        }
+    }
+
+    fclose(mem->file);
+}
+
+static bool get_sysfs_dev_dir(int fd, char* path_buf, int path_buf_len)
+{
+    char* name = drmGetPrimaryDeviceNameFromFd(fd);
+    char buffer[PATH_MAX];
+    int cardno = -1;
+    int len;
+
+    if (name != NULL) {
+        strncpy(buffer, DRM_DIR_NAME, sizeof(buffer) - 1);
+        strncat(buffer, "/card%d", sizeof(buffer) - 1);
+        len = sscanf(name, buffer, &cardno);
+        if (len != 1) {
+            fprintf(stderr, "Can't get card number by pattern\n");
+            return false;
+        }
+        free(name);
+    } else {
+        fprintf(stderr, "Can't resolve sysfs file path by fd\n");
+        return false;
+    }
+
+    if (cardno == -1) {
+        fprintf(stderr, "Can't obtain card number by fd\n");
+        return false;
+    }
+
+    len = snprintf(path_buf, path_buf_len, "/sys/class/drm/card%d", cardno);
+    if (len < 0 || len >= path_buf_len) {
+        fprintf(stderr, "Failed to concatenate sysfs path to drm device\n");
+        return false;
+    }
+
+    return true;
+}
+
+int qnx_ioctl(int fd, unsigned int request, void *arg)
+{
+	int dev_info = 0;
+	int error = EOK;
+
+	/* DRM drivers return EOK, non EOK return means some system issue */
+	error = devctl(fd, request, arg, IOCPARM_LEN(request), &dev_info);
+	if (error) {
+		errno = error;
+		return -1;
+	}
+
+	/* GNU libc for Linux has following special comment on return code:      */
+	/* Usually, on success zero is returned.  A few ioctl() requests use the */
+	/* return value as an output parameter and return a nonnegative value on */
+	/* success.  On error, -1 is returned, and errno is set appropriately.   */
+	errno = EOK;
+	if (dev_info < 0) {
+		errno = -dev_info;
+		error = -1;
+	} else {
+		error = dev_info;
+	}
+
+	return error;
+}
+
+#endif /* __QNX__ */
 
 static bool
 drmGetAfbcFormatModifierNameFromArm(uint64_t modifier, FILE *fp)
@@ -305,7 +463,12 @@ drmGetFormatModifierNameFromArm(uint64_t modifier)
     char *modifier_name = NULL;
     bool result = false;
 
+#if !defined(__QNX__)
     fp = open_memstream(&modifier_name, &size);
+#else /* !__QNX__ */
+    struct qnx_memstream memstream;
+    fp = qnx_memstream_open(&memstream, &modifier_name, &size);
+#endif /* !__QNX__ */
     if (!fp)
         return NULL;
 
@@ -323,7 +486,11 @@ drmGetFormatModifierNameFromArm(uint64_t modifier)
         break;
     }
 
+#if !defined(__QNX__)
     fclose(fp);
+#else /* !__QNX__ */
+    qnx_memstream_close(&memstream);
+#endif /* !__QNX__ */
     if (!result) {
         free(modifier_name);
         return NULL;
@@ -411,7 +578,12 @@ drmGetFormatModifierNameFromAmd(uint64_t modifier)
     char *mod_amd = NULL;
     size_t size = 0;
 
+#if !defined(__QNX__)
     fp = open_memstream(&mod_amd, &size);
+#else /* !__QNX__ */
+    struct qnx_memstream memstream;
+    fp = qnx_memstream_open(&memstream, &mod_amd, &size);
+#endif /* !__QNX__ */
     if (!fp)
         return NULL;
 
@@ -432,7 +604,11 @@ drmGetFormatModifierNameFromAmd(uint64_t modifier)
         fprintf(fp, "GFX12");
         break;
     default:
+#if !defined(__QNX__)
         fclose(fp);
+#else /* !__QNX__ */
+        qnx_memstream_close(&memstream);
+#endif /* !__QNX__ */
         free(mod_amd);
         return NULL;
     }
@@ -512,7 +688,11 @@ drmGetFormatModifierNameFromAmd(uint64_t modifier)
         }
     }
 
+#if !defined(__QNX__)
     fclose(fp);
+#else /* !__QNX__ */
+    qnx_memstream_close(&memstream);
+#endif /* !__QNX__ */
     return mod_amd;
 }
 
@@ -684,6 +864,7 @@ drm_public void drmFree(void *pt)
     free(pt);
 }
 
+
 /**
  * Call ioctl, restarting if it is interrupted
  */
@@ -693,7 +874,11 @@ drmIoctl(int fd, unsigned long request, void *arg)
     int ret;
 
     do {
+#if !defined(__QNX__)
         ret = ioctl(fd, request, arg);
+#else /* !__QNX__ */
+        ret = qnx_ioctl(fd, request, arg);
+#endif /* !__QNX__ */
     } while (ret == -1 && (errno == EINTR || errno == EAGAIN));
     return ret;
 }
@@ -848,7 +1033,7 @@ static int drmOpenDevice(dev_t dev, int minor, int type)
     int             fd;
     mode_t          devmode = DRM_DEV_MODE, serv_mode;
     gid_t           serv_group;
-#if !UDEV
+#if !UDEV && !defined(__QNX__)
     int             isroot  = !geteuid();
     uid_t           user    = DRM_DEV_UID;
     gid_t           group   = DRM_DEV_GID;
@@ -866,7 +1051,7 @@ static int drmOpenDevice(dev_t dev, int minor, int type)
         devmode &= ~(S_IXUSR|S_IXGRP|S_IXOTH);
     }
 
-#if !UDEV
+#if !UDEV && !defined(__QNX__)
     if (stat(DRM_DIR_NAME, &st)) {
         if (!isroot)
             return DRM_ERR_NOT_ROOT;
@@ -919,7 +1104,7 @@ wait_for_udev:
     if (fd >= 0)
         return fd;
 
-#if !UDEV
+#if !UDEV && !defined(__QNX__)
     /* Check if the device node is not what we expect it to be, and recreate it
      * and try again if so.
      */
@@ -964,8 +1149,14 @@ static int drmOpenMinor(int minor, int create, int type)
     char buf[DRM_NODE_NAME_MAX];
     const char *dev_name = drmGetDeviceName(type);
 
-    if (create)
+    if (create) {
+#if !defined(__QNX__)
         return drmOpenDevice(makedev(DRM_MAJOR, minor), minor, type);
+#else /* !__QNX__*/
+        drmQNXResolveMajor();
+        return drmOpenDevice(makedev(0, DRM_MAJOR, minor), minor, type);
+#endif /* !__QNX__ */
+    }
 
     if (!dev_name)
         return -EINVAL;
@@ -1961,7 +2152,11 @@ drm_public int drmDMA(int fd, drmDMAReqPtr request)
     dma.granted_count   = 0;
 
     do {
+#if !defined(__QNX__)
         ret = ioctl( fd, DRM_IOCTL_DMA, &dma );
+#else /* !__QNX__ */
+        ret = qnx_ioctl( fd, DRM_IOCTL_DMA, &dma );
+#endif /* !__QNX__ */
     } while ( ret && errno == EAGAIN && i++ < DRM_DMA_RETRY );
 
     if ( ret == 0 ) {
@@ -2682,7 +2877,11 @@ drm_public int drmWaitVBlank(int fd, drmVBlankPtr vbl)
     timeout.tv_sec++;
 
     do {
+#if !defined(__QNX__)
        ret = ioctl(fd, DRM_IOCTL_WAIT_VBLANK, vbl);
+#else /* !__QNX__ */
+       ret = qnx_ioctl(fd, DRM_IOCTL_WAIT_VBLANK, vbl);
+#endif /* !__QNX__ */
        vbl->request.type &= ~DRM_VBLANK_RELATIVE;
        if (ret && errno == EINTR) {
            clock_gettime(CLOCK_MONOTONIC, &cur);
@@ -3340,6 +3539,9 @@ static bool drmNodeIsDRM(int maj, int min)
      * in /dev/drm/ and links in /dev/dri while a WIP in kernel driver creates
      * only device nodes in /dev/dri/ */
     return (!strncmp(name, "drm/", 4) || !strncmp(name, "dri/", 4));
+#elif defined(__QNX__)
+    drmQNXResolveMajor();
+    return maj == DRM_MAJOR;
 #else
     return maj == DRM_MAJOR;
 #endif
@@ -3496,6 +3698,50 @@ static char *drmGetMinorNameForFD(int fd, int type)
          id + drmGetMinorBase(type));
 
     return strdup(name);
+#elif defined(__QNX__)
+    const char* dev_name = NULL;
+    struct stat sbuf;
+    unsigned int min;
+    char buf[256];
+
+    if (fstat(fd, &sbuf)) {
+        return NULL;
+    }
+
+    /* Make device number from minor */
+    min = minor(sbuf.st_rdev);
+    switch(min) {
+        case 0 ... 63:
+             break;
+        case 64 ... 127:
+             min -= 64;
+             break;
+        case 128 ... 191:
+             min -= 128;
+             break;
+        default:
+             return NULL;
+    }
+
+    switch (type) {
+        case DRM_NODE_PRIMARY:
+             dev_name = DRM_DEV_NAME;
+             break;
+        case DRM_NODE_CONTROL:
+             dev_name = DRM_CONTROL_DEV_NAME;
+             min += 64;
+             break;
+        case DRM_NODE_RENDER:
+             dev_name = DRM_RENDER_DEV_NAME;
+             min += 128;
+             break;
+        default:
+             return NULL;
+    };
+
+    snprintf(buf, sizeof(buf), dev_name, DRM_DIR_NAME, min);
+
+    return strdup(buf);
 #else
     struct stat sbuf;
     char buf[PATH_MAX + 1];
@@ -3533,7 +3779,7 @@ drm_public char *drmGetRenderDeviceNameFromFd(int fd)
     return drmGetMinorNameForFD(fd, DRM_NODE_RENDER);
 }
 
-#ifdef __linux__
+#ifdef __linux__ || defined(__QNX__)
 static char * DRM_PRINTFLIKE(2, 3)
 sysfs_uevent_get(const char *path, const char *fmt, ...)
 {
@@ -3580,7 +3826,7 @@ sysfs_uevent_get(const char *path, const char *fmt, ...)
 /* Little white lie to avoid major rework of the existing code */
 #define DRM_BUS_VIRTIO 0x10
 
-#ifdef __linux__
+#ifdef __linux__ || defined(__QNX__)
 static int get_subsystem_type(const char *device_path)
 {
     char path[PATH_MAX + 1] = "";
@@ -3620,10 +3866,17 @@ static int get_subsystem_type(const char *device_path)
 
 static int drmParseSubsystemType(int maj, int min)
 {
-#ifdef __linux__
+#ifdef __linux__ || defined(__QNX__)
     char path[PATH_MAX + 1] = "";
     char real_path[PATH_MAX + 1] = "";
     int subsystem_type;
+
+#if defined(__QNX__)
+    drmQNXResolveMajor();
+    if (maj == DRM_MAJOR) {
+        maj = LINUX_DRM_MAJOR;
+    }
+#endif /* __QNX__ */
 
     snprintf(path, sizeof(path), "/sys/dev/char/%d:%d/device", maj, min);
 
@@ -3647,11 +3900,18 @@ static int drmParseSubsystemType(int maj, int min)
 #endif
 }
 
-#ifdef __linux__
+#ifdef __linux__ || defined(__QNX__)
 static void
 get_pci_path(int maj, int min, char *pci_path)
 {
     char path[PATH_MAX + 1], *term;
+
+#if defined(__QNX__)
+    drmQNXResolveMajor();
+    if (maj == DRM_MAJOR) {
+        maj = LINUX_DRM_MAJOR;
+    }
+#endif /* __QNX__ */
 
     snprintf(path, sizeof(path), "/sys/dev/char/%d:%d/device", maj, min);
     if (!realpath(path, pci_path)) {
@@ -3724,7 +3984,7 @@ static int get_sysctl_pci_bus_info(int maj, int min, drmPciBusInfoPtr info)
 
 static int drmParsePciBusInfo(int maj, int min, drmPciBusInfoPtr info)
 {
-#ifdef __linux__
+#ifdef __linux__ || defined(__QNX__)
     unsigned int domain, bus, dev, func;
     char pci_path[PATH_MAX + 1], *value;
     int num;
@@ -3832,7 +4092,7 @@ static int drmGetMaxNodeName(void)
            3 /* length of the node number */;
 }
 
-#ifdef __linux__
+#ifdef __linux__ || defined(__QNX__)
 static int parse_separate_sysfs_files(int maj, int min,
                                       drmPciDeviceInfoPtr device,
                                       bool ignore_revision)
@@ -3910,7 +4170,7 @@ static int drmParsePciDeviceInfo(int maj, int min,
                                  drmPciDeviceInfoPtr device,
                                  uint32_t flags)
 {
-#ifdef __linux__
+#ifdef __linux__ || defined(__QNX__)
     if (!(flags & DRM_DEVICE_GET_PCI_REVISION))
         return parse_separate_sysfs_files(maj, min, device, true);
 
@@ -4134,7 +4394,7 @@ free_device:
     return ret;
 }
 
-#ifdef __linux__
+#ifdef __linux__ || defined(__QNX__)
 static int drm_usb_dev_path(int maj, int min, char *path, size_t len)
 {
     char *value, *tmp_path, *slash;
@@ -4214,6 +4474,9 @@ static int drmParseUsbBusInfo(int maj, int min, drmUsbBusInfoPtr info)
     info->dev = dev;
 
     return 0;
+#elif defined(__QNX__)
+    /* No USB support for now */
+    return -EINVAL;
 #else
 #warning "Missing implementation of drmParseUsbBusInfo"
     return -EINVAL;
@@ -4245,6 +4508,9 @@ static int drmParseUsbDeviceInfo(int maj, int min, drmUsbDeviceInfoPtr info)
     info->product = product;
 
     return 0;
+#elif defined(__QNX__)
+    /* No USB support for now */
+    return -EINVAL;
 #else
 #warning "Missing implementation of drmParseUsbDeviceInfo"
     return -EINVAL;
@@ -4292,8 +4558,15 @@ free_device:
 
 static int drmParseOFBusInfo(int maj, int min, char *fullname)
 {
-#ifdef __linux__
+#ifdef __linux__ || defined(__QNX__)
     char path[PATH_MAX + 1], *name, *tmp_name;
+
+#if defined(__QNX__)
+    drmQNXResolveMajor();
+    if (maj == DRM_MAJOR) {
+        maj = LINUX_DRM_MAJOR;
+    }
+#endif /* __QNX__ */
 
     snprintf(path, sizeof(path), "/sys/dev/char/%d:%d/device", maj, min);
 
@@ -4327,10 +4600,17 @@ static int drmParseOFBusInfo(int maj, int min, char *fullname)
 
 static int drmParseOFDeviceInfo(int maj, int min, char ***compatible)
 {
-#ifdef __linux__
+#ifdef __linux__ || defined(__QNX__)
     char path[PATH_MAX + 1], *value, *tmp_name;
     unsigned int count, i;
     int err;
+
+#if defined(__QNX__)
+    drmQNXResolveMajor();
+    if (maj == DRM_MAJOR) {
+        maj = LINUX_DRM_MAJOR;
+    }
+#endif /* __QNX__ */
 
     snprintf(path, sizeof(path), "/sys/dev/char/%d:%d/device", maj, min);
 
@@ -4467,7 +4747,7 @@ free_device:
 
 static int drmParseFauxBusInfo(int maj, int min, char *fullname)
 {
-#ifdef __linux__
+#ifdef __linux__ || defined(__QNX__)
     char path[PATH_MAX + 1] = "";
     char real_path[PATH_MAX + 1] = "";
     char *name;
@@ -4941,6 +5221,29 @@ drm_public char *drmGetDeviceNameFromFd2(int fd)
     return strdup(path);
 #elif defined(__FreeBSD__)
     return drmGetDeviceNameFromFd(fd);
+#elif defined(__QNX__)
+    struct stat sbuf;
+    unsigned int min;
+    char buf[512];
+
+    if (fstat(fd, &sbuf))
+        return NULL;
+
+    min = minor(sbuf.st_rdev);
+
+    switch(min) {
+        case 0 ... 63:
+             snprintf(buf, sizeof(buf), DRM_DEV_NAME, DRM_DIR_NAME, min);
+             break;
+        case 64 ... 127:
+             snprintf(buf, sizeof(buf), DRM_CONTROL_DEV_NAME, DRM_DIR_NAME, min);
+             break;
+        case 128 ... 191:
+             snprintf(buf, sizeof(buf), DRM_RENDER_DEV_NAME, DRM_DIR_NAME, min);
+             break;
+    }
+
+    return strdup(buf);
 #else
     struct stat      sbuf;
     char             node[PATH_MAX + 1];

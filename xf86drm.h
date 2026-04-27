@@ -56,6 +56,18 @@ extern "C" {
 #define DRM_IOC_READWRITE	_IOC_READ|_IOC_WRITE
 #define DRM_IOC(dir, group, nr, size) _IOC(dir, group, nr, size)
 
+#elif defined(__QNX__)
+
+#include <devctl.h>
+#include <inttypes.h>
+#include <sys/ioctl.h>
+#define DRM_IOCTL_NR(n)         ((n) & 0xff)
+#define DRM_IOC_VOID            _POSIX_DEVDIR_NONE
+#define DRM_IOC_READ            _POSIX_DEVDIR_FROM
+#define DRM_IOC_WRITE           _POSIX_DEVDIR_TO
+#define DRM_IOC_READWRITE       _POSIX_DEVDIR_TOFROM
+#define DRM_IOC(dir, group, nr, size) _IOC(dir, group, nr, size)
+
 #else /* One of the *BSDs */
 
 #include <sys/ioccom.h>
