@@ -536,6 +536,8 @@ drmModeDestroyDumbBuffer(int fd, uint32_t handle);
 extern int
 drmModeMapDumbBuffer(int fd, uint32_t handle, uint64_t *offset);
 
+extern const struct drm_mode_atomic_err_code * drmModeAtomicGetErrorCode(drmModeAtomicReqPtr req);
+
 #if defined(__cplusplus)
 }
 #endif
