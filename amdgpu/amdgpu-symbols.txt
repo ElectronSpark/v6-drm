@@ -87,6 +87,7 @@ amdgpu_va_range_query
 amdgpu_vm_reserve_vmid
 amdgpu_vm_unreserve_vmid
 amdgpu_create_userqueue
+amdgpu_modify_userqueue
 amdgpu_free_userqueue
 amdgpu_userq_signal
 amdgpu_userq_wait

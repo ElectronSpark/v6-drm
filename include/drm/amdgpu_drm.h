@@ -326,6 +326,7 @@ union drm_amdgpu_ctx {
 /* user queue IOCTL operations */
 #define AMDGPU_USERQ_OP_CREATE	1
 #define AMDGPU_USERQ_OP_FREE	2
+#define AMDGPU_USERQ_OP_MODIFY	3
 
 /* queue priority levels */
 #define AMDGPU_USERQ_CREATE_FLAGS_QUEUE_PRIORITY_MASK  0x3
@@ -456,6 +457,33 @@ struct drm_amdgpu_userq_mqd_compute_gfx11 {
 	 * to get the size.
 	 */
 	__u64   eop_va;
+	/**
+	 * @cu_mask_ptr: User-space pointer to CU (Compute Unit) mask array
+	 * Points to an array of __u32 values that define which CUs are enabled
+	 * for this queue (0 = disabled, 1 = enabled per bit)
+	 */
+	__u64 cu_mask_ptr;
+	/**
+	 * @cu_mask_count: Number of entries in the CU mask array
+	 * Total count of __u32 elements in the cu_mask_ptr array (each element
+	 * represents 32 CUs/WGPs)
+	 */
+	__u32 cu_mask_count;
+	/**
+	 * @queue_percentage: Queue resource allocation percentage (0-100)
+	 * Defines the percentage of GPU resources allocated to this queue
+	 */
+	__u32 queue_percentage;
+	/**
+	 * @hqd_queue_priority: Hqd Queue priority (0-15)
+	 * Higher values indicate higher scheduling priority for the queue
+	 */
+	__u32 hqd_queue_priority;
+	/**
+	 * @pm4_target_xcc: PM4 target XCC identifier (for gfx9/gfx12.1)
+	 * Specifies the target XCC (Cross Compute Complex) for PM4 commands
+	 */
+	__u32 pm4_target_xcc;
 };
 
 /* userq signal/wait ioctl */
@@ -1484,6 +1512,8 @@ struct drm_amdgpu_info_hw_ip {
 	__u32  available_rings;
 	/** version info: bits 23:16 major, 15:8 minor, 7:0 revision */
 	__u32  ip_discovery_version;
+	/* Userq available slots */
+	__u32  userq_num_slots;
 };
 
 /* GFX metadata BO sizes and alignment info (in bytes) */

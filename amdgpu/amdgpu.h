@@ -2066,6 +2066,28 @@ int amdgpu_create_userqueue(amdgpu_device_handle dev,
 			    uint32_t *queue_id);
 
 /**
+ * Modify USERQUEUE
+ * \param   dev			- \c [in] device handle
+ * \param   ip_type		- \c [in] ip type
+ * \param   queue_id		- \c [in] queue id
+ * \param   queue_va		- \c [in] Virtual address of queue
+ * \param   queue_size		- \c [in] userqueue size
+ * \param   wptr_va		- \c [in] Virtual address of wptr
+ * \param   rptr_va		- \c [in] Virtual address of rptr
+ * \param   mqd_in		- \c [in] MQD data
+ *
+ * \return  0 on success otherwise POSIX Error code
+ */
+int amdgpu_modify_userqueue(amdgpu_device_handle dev,
+			uint32_t ip_type,
+			uint32_t queue_id,
+			uint64_t queue_va,
+			uint64_t queue_size,
+			uint64_t wptr_va,
+			uint64_t rptr_va,
+			void *mqd_in);
+
+/**
  * Free USERQUEUE
  * \param   dev		- \c [in] device handle
  * \param   queue_id	- \c [in]  queue id

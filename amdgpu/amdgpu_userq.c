@@ -86,6 +86,57 @@ amdgpu_create_userqueue(amdgpu_device_handle dev,
 }
 
 drm_public int
+amdgpu_modify_userqueue(amdgpu_device_handle dev,
+			uint32_t ip_type,
+			uint32_t queue_id,
+			uint64_t queue_va,
+			uint64_t queue_size,
+			uint64_t wptr_va,
+			uint64_t rptr_va,
+			void *mqd_in)
+{
+	int ret;
+	union drm_amdgpu_userq userq;
+	uint64_t mqd_size;
+
+	if (!dev)
+		return -EINVAL;
+
+	switch (ip_type) {
+	case AMDGPU_HW_IP_GFX:
+		mqd_size = sizeof(struct drm_amdgpu_userq_mqd_gfx11);
+		break;
+	case AMDGPU_HW_IP_DMA:
+		mqd_size = sizeof(struct drm_amdgpu_userq_mqd_sdma_gfx11);
+		break;
+	case AMDGPU_HW_IP_COMPUTE:
+		mqd_size = sizeof(struct drm_amdgpu_userq_mqd_compute_gfx11);
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	memset(&userq, 0, sizeof(userq));
+
+	userq.in.op = AMDGPU_USERQ_OP_MODIFY;
+	userq.in.ip_type = ip_type;
+	userq.in.queue_id = queue_id;
+
+	userq.in.queue_va = queue_va;
+	userq.in.queue_size = queue_size;
+	userq.in.wptr_va = wptr_va;
+	userq.in.rptr_va = rptr_va;
+
+	userq.in.mqd = (uint64_t)mqd_in;
+	userq.in.mqd_size = mqd_size;
+
+	ret = drmCommandWriteRead(dev->fd, DRM_AMDGPU_USERQ,
+				  &userq, sizeof(userq));
+
+	return ret;
+}
+
+drm_public int
 amdgpu_free_userqueue(amdgpu_device_handle dev, uint32_t queue_id)
 {
 	union drm_amdgpu_userq userq;
