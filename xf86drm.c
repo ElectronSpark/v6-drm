@@ -81,6 +81,27 @@
 
 #include "util_math.h"
 
+#define XV6_FB_GPU_BO_EXPORT_FD 0x4622
+#define XV6_FB_GPU_BO_IMPORT_FD 0x4623
+
+struct xv6_fb_gpu_bo_export_fd {
+    uint32_t handle;
+    uint32_t flags;
+    int32_t fd;
+    uint32_t reserved;
+};
+
+struct xv6_fb_gpu_bo_import_fd {
+    int32_t fd;
+    uint32_t flags;
+    uint32_t width;
+    uint32_t height;
+    uint32_t pitch;
+    uint32_t handle;
+    uint64_t size;
+    uint64_t addr;
+};
+
 #ifdef __DragonFly__
 #define DRM_MAJOR 145
 #endif
@@ -1247,6 +1268,26 @@ drm_public int drmOpen(const char *name, const char *busid)
     return drmOpenWithType(name, busid, DRM_NODE_PRIMARY);
 }
 
+static bool drmXv6DriverNameMatches(const char *name)
+{
+    return name == NULL || strcmp(name, "xv6") == 0 ||
+           strcmp(name, "virtio_gpu") == 0 ||
+           strcmp(name, "virtio-gpu") == 0;
+}
+
+static int drmOpenXv6RenderDevice(const char *name)
+{
+    int fd;
+
+    if (!drmXv6DriverNameMatches(name))
+        return -1;
+
+    fd = open("/dev/gpu0", O_RDWR | O_CLOEXEC);
+    if (fd >= 0)
+        return fd;
+    return open("/dev/fb0", O_RDWR | O_CLOEXEC);
+}
+
 /**
  * Open the DRM device with specified type.
  *
@@ -1265,6 +1306,14 @@ drm_public int drmOpen(const char *name, const char *busid)
  */
 drm_public int drmOpenWithType(const char *name, const char *busid, int type)
 {
+    int fd;
+
+    if (busid == NULL && (type == DRM_NODE_RENDER || type == DRM_NODE_PRIMARY)) {
+        fd = drmOpenXv6RenderDevice(name);
+        if (fd >= 0)
+            return fd;
+    }
+
     if (name != NULL && drm_server_info &&
         drm_server_info->load_module && !drmAvailable()) {
         /* try to load the kernel module */
@@ -1275,9 +1324,9 @@ drm_public int drmOpenWithType(const char *name, const char *busid, int type)
     }
 
     if (busid) {
-        int fd = drmOpenByBusid(busid, type);
-        if (fd >= 0)
-            return fd;
+        int bus_fd = drmOpenByBusid(busid, type);
+        if (bus_fd >= 0)
+            return bus_fd;
     }
 
     if (name)
@@ -1293,6 +1342,11 @@ drm_public int drmOpenControl(int minor)
 
 drm_public int drmOpenRender(int minor)
 {
+    int fd = drmOpenXv6RenderDevice(NULL);
+
+    if (fd >= 0)
+        return fd;
+
     return drmOpenMinor(minor, 0, DRM_NODE_RENDER);
 }
 
@@ -3371,6 +3425,7 @@ drm_public int drmPrimeHandleToFD(int fd, uint32_t handle, uint32_t flags,
                                   int *prime_fd)
 {
     struct drm_prime_handle args;
+    struct xv6_fb_gpu_bo_export_fd xv6_args;
     int ret;
 
     memclear(args);
@@ -3378,26 +3433,50 @@ drm_public int drmPrimeHandleToFD(int fd, uint32_t handle, uint32_t flags,
     args.handle = handle;
     args.flags = flags;
     ret = drmIoctl(fd, DRM_IOCTL_PRIME_HANDLE_TO_FD, &args);
-    if (ret)
-        return ret;
+    if (ret == 0) {
+        *prime_fd = args.fd;
+        return 0;
+    }
 
-    *prime_fd = args.fd;
-    return 0;
+    memclear(xv6_args);
+    xv6_args.fd = -1;
+    xv6_args.handle = handle;
+    xv6_args.flags = flags;
+    if (ioctl(fd, XV6_FB_GPU_BO_EXPORT_FD, &xv6_args) == 0 &&
+        xv6_args.fd >= 0) {
+        *prime_fd = xv6_args.fd;
+        return 0;
+    }
+
+    return ret;
 }
 
 drm_public int drmPrimeFDToHandle(int fd, int prime_fd, uint32_t *handle)
 {
     struct drm_prime_handle args;
+    struct xv6_fb_gpu_bo_import_fd xv6_args;
     int ret;
 
     memclear(args);
     args.fd = prime_fd;
     ret = drmIoctl(fd, DRM_IOCTL_PRIME_FD_TO_HANDLE, &args);
-    if (ret)
-        return ret;
+    if (ret == 0) {
+        *handle = args.handle;
+        return 0;
+    }
 
-    *handle = args.handle;
-    return 0;
+    memclear(xv6_args);
+    xv6_args.fd = prime_fd;
+    if (ioctl(fd, XV6_FB_GPU_BO_IMPORT_FD, &xv6_args) == 0 &&
+        xv6_args.handle != 0) {
+        if (xv6_args.addr != 0 && xv6_args.size != 0)
+            drm_munmap((void *)(uintptr_t)xv6_args.addr,
+                       (size_t)xv6_args.size);
+        *handle = xv6_args.handle;
+        return 0;
+    }
+
+    return ret;
 }
 
 drm_public int drmCloseBufferHandle(int fd, uint32_t handle)
@@ -3530,6 +3609,11 @@ drm_public char *drmGetPrimaryDeviceNameFromFd(int fd)
 
 drm_public char *drmGetRenderDeviceNameFromFd(int fd)
 {
+    (void)fd;
+
+    if (access("/dev/gpu0", R_OK | W_OK) == 0)
+        return strdup("/dev/gpu0");
+
     return drmGetMinorNameForFD(fd, DRM_NODE_RENDER);
 }
 
