@@ -1306,7 +1306,8 @@ static bool drmXv6DriverNameMatches(const char *name)
 {
     return name == NULL || strcmp(name, "xv6") == 0 ||
            strcmp(name, "virtio_gpu") == 0 ||
-           strcmp(name, "virtio-gpu") == 0;
+           strcmp(name, "virtio-gpu") == 0 ||
+           strcmp(name, "nouveau") == 0;
 }
 
 static int drmOpenXv6RenderDevice(const char *name)
