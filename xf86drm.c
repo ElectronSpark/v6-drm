@@ -83,8 +83,11 @@
 
 #define XV6_FB_GPU_BO_EXPORT_FD 0x4622
 #define XV6_FB_GPU_BO_IMPORT_FD 0x4623
+#define XV6_DRM_PRIMARY_MAJOR 226
+#define XV6_DRM_PRIMARY_MINOR 0
 #define XV6_DRM_RENDER_MAJOR 226
 #define XV6_DRM_RENDER_MINOR 128
+#define XV6_DRM_PRIMARY_NODE "/dev/dri/card0"
 #define XV6_DRM_RENDER_NODE "/dev/dri/renderD128"
 #define XV6_GPU_NODE "/dev/gpu0"
 #define XV6_DEV_MAJOR(dev) ((((uint64_t)(dev)) >> 20) & 0xfff)
@@ -153,27 +156,52 @@ static drmServerInfoPtr drm_server_info;
 static bool drmNodeIsDRM(int maj, int min);
 static char *drmGetMinorNameForFD(int fd, int type);
 
-static bool drmIsXv6RenderDev(dev_t dev)
+static bool drmIsXv6NodeDev(dev_t dev, const char *node,
+                            unsigned int *maj, unsigned int *min)
 {
     struct stat sbuf;
 
-    if (XV6_DEV_MAJOR(dev) == XV6_DRM_RENDER_MAJOR &&
-        XV6_DEV_MINOR(dev) == XV6_DRM_RENDER_MINOR)
-        return true;
+    if (stat(node, &sbuf) != 0 || sbuf.st_rdev != dev)
+        return false;
 
-    return stat(XV6_DRM_RENDER_NODE, &sbuf) == 0 && sbuf.st_rdev == dev;
+    if (strcmp(node, XV6_DRM_PRIMARY_NODE) == 0) {
+        *maj = XV6_DRM_PRIMARY_MAJOR;
+        *min = XV6_DRM_PRIMARY_MINOR;
+        return true;
+    }
+
+    *maj = XV6_DRM_RENDER_MAJOR;
+    *min = XV6_DRM_RENDER_MINOR;
+    return true;
 }
 
 static void drmDecodeDeviceRdev(dev_t dev, unsigned int *maj, unsigned int *min)
 {
-    if (drmIsXv6RenderDev(dev)) {
+    if (XV6_DEV_MAJOR(dev) == XV6_DRM_PRIMARY_MAJOR &&
+        XV6_DEV_MINOR(dev) == XV6_DRM_PRIMARY_MINOR) {
+        *maj = XV6_DRM_PRIMARY_MAJOR;
+        *min = XV6_DRM_PRIMARY_MINOR;
+        return;
+    }
+
+    if (XV6_DEV_MAJOR(dev) == XV6_DRM_RENDER_MAJOR &&
+        XV6_DEV_MINOR(dev) == XV6_DRM_RENDER_MINOR) {
         *maj = XV6_DRM_RENDER_MAJOR;
         *min = XV6_DRM_RENDER_MINOR;
         return;
     }
 
+    if (drmIsXv6NodeDev(dev, XV6_DRM_PRIMARY_NODE, maj, min) ||
+        drmIsXv6NodeDev(dev, XV6_DRM_RENDER_NODE, maj, min))
+        return;
+
     *maj = major(dev);
     *min = minor(dev);
+}
+
+static bool drmIsXv6PrimaryNodeName(const char *name)
+{
+    return strcmp(name, "card0") == 0;
 }
 
 static bool drmIsXv6RenderNodeName(const char *name)
@@ -1310,16 +1338,49 @@ static bool drmXv6DriverNameMatches(const char *name)
            strcmp(name, "nouveau") == 0;
 }
 
-static int drmOpenXv6RenderDevice(const char *name)
+static bool drmXv6DevicePathMatches(const char *path)
+{
+    return path && path[0] == '/' &&
+           (strcmp(path, XV6_DRM_PRIMARY_NODE) == 0 ||
+            strcmp(path, XV6_DRM_RENDER_NODE) == 0 ||
+            strcmp(path, XV6_GPU_NODE) == 0 ||
+            strcmp(path, "/dev/fb0") == 0);
+}
+
+static int drmOpenXv6DevicePath(const char *path)
+{
+    if (!drmXv6DevicePathMatches(path)) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    return open(path, O_RDWR | O_CLOEXEC);
+}
+
+static int drmOpenXv6Device(const char *name, int type)
 {
     int fd;
 
     if (!drmXv6DriverNameMatches(name))
         return -1;
 
+    if (type == DRM_NODE_PRIMARY) {
+        fd = open(XV6_DRM_PRIMARY_NODE, O_RDWR | O_CLOEXEC);
+        if (fd >= 0)
+            return fd;
+    }
+
     fd = open(XV6_DRM_RENDER_NODE, O_RDWR | O_CLOEXEC);
     if (fd >= 0)
         return fd;
+
+    if (type == DRM_NODE_PRIMARY) {
+        fd = open(XV6_GPU_NODE, O_RDWR | O_CLOEXEC);
+        if (fd >= 0)
+            return fd;
+        return open("/dev/fb0", O_RDWR | O_CLOEXEC);
+    }
+
     fd = open(XV6_GPU_NODE, O_RDWR | O_CLOEXEC);
     if (fd >= 0)
         return fd;
@@ -1346,8 +1407,11 @@ drm_public int drmOpenWithType(const char *name, const char *busid, int type)
 {
     int fd;
 
+    if (drmXv6DevicePathMatches(busid))
+        return drmOpenXv6DevicePath(busid);
+
     if (busid == NULL && (type == DRM_NODE_RENDER || type == DRM_NODE_PRIMARY)) {
-        fd = drmOpenXv6RenderDevice(name);
+        fd = drmOpenXv6Device(name, type);
         if (fd >= 0)
             return fd;
     }
@@ -1380,7 +1444,7 @@ drm_public int drmOpenControl(int minor)
 
 drm_public int drmOpenRender(int minor)
 {
-    int fd = drmOpenXv6RenderDevice(NULL);
+    int fd = drmOpenXv6Device(NULL, DRM_NODE_RENDER);
 
     if (fd >= 0)
         return fd;
@@ -3427,7 +3491,8 @@ static bool drmNodeIsDRM(int maj, int min)
              maj, min);
     if (stat(path, &sbuf) == 0)
         return true;
-    return maj == XV6_DRM_RENDER_MAJOR && min == XV6_DRM_RENDER_MINOR;
+    return (maj == XV6_DRM_PRIMARY_MAJOR && min == XV6_DRM_PRIMARY_MINOR) ||
+           (maj == XV6_DRM_RENDER_MAJOR && min == XV6_DRM_RENDER_MINOR);
 #elif defined(__FreeBSD__)
     char name[SPECNAMELEN];
 
@@ -3560,7 +3625,12 @@ static char *drmGetMinorNameForFD(int fd, int type)
 
     sysdir = opendir(buf);
     if (!sysdir) {
-        if (maj == XV6_DRM_RENDER_MAJOR && min == XV6_DRM_RENDER_MINOR &&
+        if (maj == XV6_DRM_PRIMARY_MAJOR &&
+            min == XV6_DRM_PRIMARY_MINOR &&
+            type == DRM_NODE_PRIMARY)
+            return strdup(XV6_DRM_PRIMARY_NODE);
+        if (maj == XV6_DRM_RENDER_MAJOR &&
+            min == XV6_DRM_RENDER_MINOR &&
             type == DRM_NODE_RENDER)
             return strdup(XV6_DRM_RENDER_NODE);
         return NULL;
@@ -3758,7 +3828,8 @@ static int drmParseSubsystemType(int maj, int min)
 
     subsystem_type = get_subsystem_type(path);
     if (subsystem_type < 0 &&
-        maj == XV6_DRM_RENDER_MAJOR && min == XV6_DRM_RENDER_MINOR)
+        ((maj == XV6_DRM_PRIMARY_MAJOR && min == XV6_DRM_PRIMARY_MINOR) ||
+         (maj == XV6_DRM_RENDER_MAJOR && min == XV6_DRM_RENDER_MINOR)))
         return DRM_BUS_FAUX;
     /* Try to get the parent (underlying) device type */
     if (subsystem_type == DRM_BUS_VIRTIO) {
@@ -4607,7 +4678,8 @@ static int drmParseFauxBusInfo(int maj, int min, char *fullname)
     snprintf(path, sizeof(path), "/sys/dev/char/%d:%d/device", maj, min);
 
     if (!realpath(path, real_path)) {
-        if (maj == XV6_DRM_RENDER_MAJOR && min == XV6_DRM_RENDER_MINOR) {
+        if ((maj == XV6_DRM_PRIMARY_MAJOR && min == XV6_DRM_PRIMARY_MINOR) ||
+            (maj == XV6_DRM_RENDER_MAJOR && min == XV6_DRM_RENDER_MINOR)) {
             strncpy(fullname, "xv6-gpu", DRM_FAUX_DEVICE_NAME_LEN - 1);
             fullname[DRM_FAUX_DEVICE_NAME_LEN - 1] = '\0';
             return 0;
@@ -4687,7 +4759,10 @@ process_device(drmDevicePtr *device, const char *d_name,
     if (stat(node, &sbuf))
         return -1;
 
-    if (drmIsXv6RenderNodeName(d_name)) {
+    if (drmIsXv6PrimaryNodeName(d_name)) {
+        maj = XV6_DRM_PRIMARY_MAJOR;
+        min = XV6_DRM_PRIMARY_MINOR;
+    } else if (drmIsXv6RenderNodeName(d_name)) {
         maj = XV6_DRM_RENDER_MAJOR;
         min = XV6_DRM_RENDER_MINOR;
     } else {
@@ -5072,6 +5147,8 @@ drm_public char *drmGetDeviceNameFromFd2(int fd)
 
     value = sysfs_uevent_get(path, "DEVNAME");
     if (!value) {
+        if (maj == XV6_DRM_PRIMARY_MAJOR && min == XV6_DRM_PRIMARY_MINOR)
+            return strdup(XV6_DRM_PRIMARY_NODE);
         if (maj == XV6_DRM_RENDER_MAJOR && min == XV6_DRM_RENDER_MINOR)
             return strdup(XV6_DRM_RENDER_NODE);
         return NULL;
