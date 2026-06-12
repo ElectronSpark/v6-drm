@@ -209,6 +209,13 @@ static bool drmIsXv6RenderNodeName(const char *name)
     return strcmp(name, "renderD128") == 0;
 }
 
+static bool drmXv6TraceEnabled(void)
+{
+    const char *value = getenv("XV6_DRM_TRACE");
+
+    return value && value[0] && strcmp(value, "0") != 0;
+}
+
 #define DRM_MODIFIER(v, f, f_name) \
        .modifier = DRM_FORMAT_MOD_##v ## _ ##f, \
        .modifier_name = #f_name
@@ -4743,21 +4750,37 @@ process_device(drmDevicePtr *device, const char *d_name,
     const int max_node_length = ALIGN(drmGetMaxNodeName(), sizeof(void *));
 
     node_type = drmGetNodeType(d_name);
-    if (node_type < 0)
+    if (node_type < 0) {
+        if (drmXv6TraceEnabled())
+            fprintf(stderr, "xv6-libdrm: skip node name=%s bad-type\n",
+                    d_name);
         return -1;
+    }
 
     written = snprintf(node, PATH_MAX, "%s/%s", DRM_DIR_NAME, d_name);
-    if (written < 0)
+    if (written < 0) {
+        if (drmXv6TraceEnabled())
+            fprintf(stderr, "xv6-libdrm: skip node name=%s snprintf errno=%d\n",
+                    d_name, errno);
         return -1;
+    }
 
     /* anything longer than this will be truncated in drmDeviceAlloc.
      * Account for NULL byte
      */
-    if (written + 1 > max_node_length)
+    if (written + 1 > max_node_length) {
+        if (drmXv6TraceEnabled())
+            fprintf(stderr, "xv6-libdrm: skip node=%s too-long len=%d max=%d\n",
+                    node, written + 1, max_node_length);
         return -1;
+    }
 
-    if (stat(node, &sbuf))
+    if (stat(node, &sbuf)) {
+        if (drmXv6TraceEnabled())
+            fprintf(stderr, "xv6-libdrm: skip node=%s stat errno=%d (%s)\n",
+                    node, errno, strerror(errno));
         return -1;
+    }
 
     if (drmIsXv6PrimaryNodeName(d_name)) {
         maj = XV6_DRM_PRIMARY_MAJOR;
@@ -4768,12 +4791,29 @@ process_device(drmDevicePtr *device, const char *d_name,
     } else {
         drmDecodeDeviceRdev(sbuf.st_rdev, &maj, &min);
     }
-    if (!drmNodeIsDRM(maj, min) || !S_ISCHR(sbuf.st_mode))
+    if (!drmNodeIsDRM(maj, min) || !S_ISCHR(sbuf.st_mode)) {
+        if (drmXv6TraceEnabled())
+            fprintf(stderr,
+                    "xv6-libdrm: skip node=%s maj=%u min=%u mode=0%o drm=%d chr=%d\n",
+                    node, maj, min, (unsigned int)sbuf.st_mode,
+                    drmNodeIsDRM(maj, min), S_ISCHR(sbuf.st_mode));
         return -1;
+    }
 
     subsystem_type = drmParseSubsystemType(maj, min);
-    if (req_subsystem_type != -1 && req_subsystem_type != subsystem_type)
+    if (req_subsystem_type != -1 && req_subsystem_type != subsystem_type) {
+        if (drmXv6TraceEnabled())
+            fprintf(stderr,
+                    "xv6-libdrm: skip node=%s subsystem=%d req=%d\n",
+                    node, subsystem_type, req_subsystem_type);
         return -1;
+    }
+
+    if (drmXv6TraceEnabled())
+        fprintf(stderr,
+                "xv6-libdrm: process node=%s type=%d maj=%u min=%u subsystem=%d fetch=%d\n",
+                node, node_type, maj, min, subsystem_type,
+                fetch_deviceinfo);
 
     switch (subsystem_type) {
     case DRM_BUS_PCI:
@@ -4930,16 +4970,36 @@ drm_public int drmGetDeviceFromDevId(dev_t find_rdev, uint32_t flags, drmDeviceP
 
     drmDecodeDeviceRdev(find_rdev, &maj, &min);
 
-    if (!drmNodeIsDRM(maj, min))
+    if (drmXv6TraceEnabled())
+        fprintf(stderr,
+                "xv6-libdrm: drmGetDeviceFromDevId rdev=0x%llx maj=%u min=%u flags=0x%x\n",
+                (unsigned long long)find_rdev, maj, min, flags);
+
+    if (!drmNodeIsDRM(maj, min)) {
+        if (drmXv6TraceEnabled())
+            fprintf(stderr,
+                    "xv6-libdrm: drmGetDeviceFromDevId non-drm maj=%u min=%u\n",
+                    maj, min);
         return -EINVAL;
+    }
 
     subsystem_type = drmParseSubsystemType(maj, min);
-    if (subsystem_type < 0)
+    if (subsystem_type < 0) {
+        if (drmXv6TraceEnabled())
+            fprintf(stderr,
+                    "xv6-libdrm: drmGetDeviceFromDevId subsystem error=%d\n",
+                    subsystem_type);
         return subsystem_type;
+    }
 
     sysdir = opendir(DRM_DIR_NAME);
-    if (!sysdir)
+    if (!sysdir) {
+        if (drmXv6TraceEnabled())
+            fprintf(stderr,
+                    "xv6-libdrm: drmGetDeviceFromDevId opendir %s errno=%d (%s)\n",
+                    DRM_DIR_NAME, errno, strerror(errno));
         return -errno;
+    }
 
     i = 0;
     while ((dent = readdir(sysdir))) {
@@ -4973,6 +5033,10 @@ drm_public int drmGetDeviceFromDevId(dev_t find_rdev, uint32_t flags, drmDeviceP
     }
 
     closedir(sysdir);
+    if (drmXv6TraceEnabled())
+        fprintf(stderr,
+                "xv6-libdrm: drmGetDeviceFromDevId nodes=%d found=%d\n",
+                node_count, *device != NULL);
     if (*device == NULL)
         return -ENODEV;
     return 0;
@@ -5068,14 +5132,24 @@ drm_public int drmGetDevices2(uint32_t flags, drmDevicePtr devices[],
         return -EINVAL;
 
     sysdir = opendir(DRM_DIR_NAME);
-    if (!sysdir)
+    if (!sysdir) {
+        if (drmXv6TraceEnabled())
+            fprintf(stderr,
+                    "xv6-libdrm: drmGetDevices2 opendir %s errno=%d (%s)\n",
+                    DRM_DIR_NAME, errno, strerror(errno));
         return -errno;
+    }
 
     i = 0;
     while ((dent = readdir(sysdir))) {
         ret = process_device(&device, dent->d_name, -1, devices != NULL, flags);
-        if (ret)
+        if (ret) {
+            if (drmXv6TraceEnabled())
+                fprintf(stderr,
+                        "xv6-libdrm: drmGetDevices2 ignored name=%s ret=%d\n",
+                        dent->d_name, ret);
             continue;
+        }
 
         if (i >= MAX_DRM_NODES) {
             fprintf(stderr, "More than %d drm nodes detected. "
@@ -5104,6 +5178,11 @@ drm_public int drmGetDevices2(uint32_t flags, drmDevicePtr devices[],
     }
 
     closedir(sysdir);
+
+    if (drmXv6TraceEnabled())
+        fprintf(stderr,
+                "xv6-libdrm: drmGetDevices2 flags=0x%x requested=%d nodes=%d devices=%d\n",
+                flags, devices != NULL, node_count, device_count);
 
     if (devices != NULL)
         return MIN2(device_count, max_devices);
