@@ -81,36 +81,6 @@
 
 #include "util_math.h"
 
-#define XV6_FB_GPU_BO_EXPORT_FD 0x4622
-#define XV6_FB_GPU_BO_IMPORT_FD 0x4623
-#define XV6_DRM_PRIMARY_MAJOR 226
-#define XV6_DRM_PRIMARY_MINOR 0
-#define XV6_DRM_RENDER_MAJOR 226
-#define XV6_DRM_RENDER_MINOR 128
-#define XV6_DRM_PRIMARY_NODE "/dev/dri/card0"
-#define XV6_DRM_RENDER_NODE "/dev/dri/renderD128"
-#define XV6_GPU_NODE "/dev/gpu0"
-#define XV6_DEV_MAJOR(dev) ((((uint64_t)(dev)) >> 20) & 0xfff)
-#define XV6_DEV_MINOR(dev) (((uint64_t)(dev)) & 0xfffff)
-
-struct xv6_fb_gpu_bo_export_fd {
-    uint32_t handle;
-    uint32_t flags;
-    int32_t fd;
-    uint32_t reserved;
-};
-
-struct xv6_fb_gpu_bo_import_fd {
-    int32_t fd;
-    uint32_t flags;
-    uint32_t width;
-    uint32_t height;
-    uint32_t pitch;
-    uint32_t handle;
-    uint64_t size;
-    uint64_t addr;
-};
-
 #ifdef __DragonFly__
 #define DRM_MAJOR 145
 #endif
@@ -155,66 +125,6 @@ static drmServerInfoPtr drm_server_info;
 
 static bool drmNodeIsDRM(int maj, int min);
 static char *drmGetMinorNameForFD(int fd, int type);
-
-static bool drmIsXv6NodeDev(dev_t dev, const char *node,
-                            unsigned int *maj, unsigned int *min)
-{
-    struct stat sbuf;
-
-    if (stat(node, &sbuf) != 0 || sbuf.st_rdev != dev)
-        return false;
-
-    if (strcmp(node, XV6_DRM_PRIMARY_NODE) == 0) {
-        *maj = XV6_DRM_PRIMARY_MAJOR;
-        *min = XV6_DRM_PRIMARY_MINOR;
-        return true;
-    }
-
-    *maj = XV6_DRM_RENDER_MAJOR;
-    *min = XV6_DRM_RENDER_MINOR;
-    return true;
-}
-
-static void drmDecodeDeviceRdev(dev_t dev, unsigned int *maj, unsigned int *min)
-{
-    if (XV6_DEV_MAJOR(dev) == XV6_DRM_PRIMARY_MAJOR &&
-        XV6_DEV_MINOR(dev) == XV6_DRM_PRIMARY_MINOR) {
-        *maj = XV6_DRM_PRIMARY_MAJOR;
-        *min = XV6_DRM_PRIMARY_MINOR;
-        return;
-    }
-
-    if (XV6_DEV_MAJOR(dev) == XV6_DRM_RENDER_MAJOR &&
-        XV6_DEV_MINOR(dev) == XV6_DRM_RENDER_MINOR) {
-        *maj = XV6_DRM_RENDER_MAJOR;
-        *min = XV6_DRM_RENDER_MINOR;
-        return;
-    }
-
-    if (drmIsXv6NodeDev(dev, XV6_DRM_PRIMARY_NODE, maj, min) ||
-        drmIsXv6NodeDev(dev, XV6_DRM_RENDER_NODE, maj, min))
-        return;
-
-    *maj = major(dev);
-    *min = minor(dev);
-}
-
-static bool drmIsXv6PrimaryNodeName(const char *name)
-{
-    return strcmp(name, "card0") == 0;
-}
-
-static bool drmIsXv6RenderNodeName(const char *name)
-{
-    return strcmp(name, "renderD128") == 0;
-}
-
-static bool drmXv6TraceEnabled(void)
-{
-    const char *value = getenv("XV6_DRM_TRACE");
-
-    return value && value[0] && strcmp(value, "0") != 0;
-}
 
 #define DRM_MODIFIER(v, f, f_name) \
        .modifier = DRM_FORMAT_MOD_##v ## _ ##f, \
@@ -1337,63 +1247,6 @@ drm_public int drmOpen(const char *name, const char *busid)
     return drmOpenWithType(name, busid, DRM_NODE_PRIMARY);
 }
 
-static bool drmXv6DriverNameMatches(const char *name)
-{
-    return name == NULL || strcmp(name, "xv6") == 0 ||
-           strcmp(name, "virtio_gpu") == 0 ||
-           strcmp(name, "virtio-gpu") == 0 ||
-           strcmp(name, "nouveau") == 0;
-}
-
-static bool drmXv6DevicePathMatches(const char *path)
-{
-    return path && path[0] == '/' &&
-           (strcmp(path, XV6_DRM_PRIMARY_NODE) == 0 ||
-            strcmp(path, XV6_DRM_RENDER_NODE) == 0 ||
-            strcmp(path, XV6_GPU_NODE) == 0 ||
-            strcmp(path, "/dev/fb0") == 0);
-}
-
-static int drmOpenXv6DevicePath(const char *path)
-{
-    if (!drmXv6DevicePathMatches(path)) {
-        errno = EINVAL;
-        return -1;
-    }
-
-    return open(path, O_RDWR | O_CLOEXEC);
-}
-
-static int drmOpenXv6Device(const char *name, int type)
-{
-    int fd;
-
-    if (!drmXv6DriverNameMatches(name))
-        return -1;
-
-    if (type == DRM_NODE_PRIMARY) {
-        fd = open(XV6_DRM_PRIMARY_NODE, O_RDWR | O_CLOEXEC);
-        if (fd >= 0)
-            return fd;
-    }
-
-    fd = open(XV6_DRM_RENDER_NODE, O_RDWR | O_CLOEXEC);
-    if (fd >= 0)
-        return fd;
-
-    if (type == DRM_NODE_PRIMARY) {
-        fd = open(XV6_GPU_NODE, O_RDWR | O_CLOEXEC);
-        if (fd >= 0)
-            return fd;
-        return open("/dev/fb0", O_RDWR | O_CLOEXEC);
-    }
-
-    fd = open(XV6_GPU_NODE, O_RDWR | O_CLOEXEC);
-    if (fd >= 0)
-        return fd;
-    return open("/dev/fb0", O_RDWR | O_CLOEXEC);
-}
-
 /**
  * Open the DRM device with specified type.
  *
@@ -1412,17 +1265,6 @@ static int drmOpenXv6Device(const char *name, int type)
  */
 drm_public int drmOpenWithType(const char *name, const char *busid, int type)
 {
-    int fd;
-
-    if (drmXv6DevicePathMatches(busid))
-        return drmOpenXv6DevicePath(busid);
-
-    if (busid == NULL && (type == DRM_NODE_RENDER || type == DRM_NODE_PRIMARY)) {
-        fd = drmOpenXv6Device(name, type);
-        if (fd >= 0)
-            return fd;
-    }
-
     if (name != NULL && drm_server_info &&
         drm_server_info->load_module && !drmAvailable()) {
         /* try to load the kernel module */
@@ -1433,9 +1275,9 @@ drm_public int drmOpenWithType(const char *name, const char *busid, int type)
     }
 
     if (busid) {
-        int bus_fd = drmOpenByBusid(busid, type);
-        if (bus_fd >= 0)
-            return bus_fd;
+        int fd = drmOpenByBusid(busid, type);
+        if (fd >= 0)
+            return fd;
     }
 
     if (name)
@@ -1451,11 +1293,6 @@ drm_public int drmOpenControl(int minor)
 
 drm_public int drmOpenRender(int minor)
 {
-    int fd = drmOpenXv6Device(NULL, DRM_NODE_RENDER);
-
-    if (fd >= 0)
-        return fd;
-
     return drmOpenMinor(minor, 0, DRM_NODE_RENDER);
 }
 
@@ -3454,12 +3291,8 @@ drm_public char *drmGetDeviceNameFromFd(int fd)
     if (fstat(fd, &sbuf))
         return NULL;
 
-    if (drmIsXv6RenderNodeName(d_name)) {
-        maj = XV6_DRM_RENDER_MAJOR;
-        min = XV6_DRM_RENDER_MINOR;
-    } else {
-        drmDecodeDeviceRdev(sbuf.st_rdev, &maj, &min);
-    }
+    maj = major(sbuf.st_rdev);
+    min = minor(sbuf.st_rdev);
     nodetype = drmGetMinorType(maj, min);
     return drmGetMinorNameForFD(fd, nodetype);
 #else
@@ -3496,10 +3329,7 @@ static bool drmNodeIsDRM(int maj, int min)
 
     snprintf(path, sizeof(path), "/sys/dev/char/%d:%d/device/drm",
              maj, min);
-    if (stat(path, &sbuf) == 0)
-        return true;
-    return (maj == XV6_DRM_PRIMARY_MAJOR && min == XV6_DRM_PRIMARY_MINOR) ||
-           (maj == XV6_DRM_RENDER_MAJOR && min == XV6_DRM_RENDER_MINOR);
+    return stat(path, &sbuf) == 0;
 #elif defined(__FreeBSD__)
     char name[SPECNAMELEN];
 
@@ -3518,13 +3348,13 @@ static bool drmNodeIsDRM(int maj, int min)
 drm_public int drmGetNodeTypeFromFd(int fd)
 {
     struct stat sbuf;
-    unsigned int maj, min;
-    int type;
+    int maj, min, type;
 
     if (fstat(fd, &sbuf))
         return -1;
 
-    drmDecodeDeviceRdev(sbuf.st_rdev, &maj, &min);
+    maj = major(sbuf.st_rdev);
+    min = minor(sbuf.st_rdev);
 
     if (!drmNodeIsDRM(maj, min) || !S_ISCHR(sbuf.st_mode)) {
         errno = EINVAL;
@@ -3541,7 +3371,6 @@ drm_public int drmPrimeHandleToFD(int fd, uint32_t handle, uint32_t flags,
                                   int *prime_fd)
 {
     struct drm_prime_handle args;
-    struct xv6_fb_gpu_bo_export_fd xv6_args;
     int ret;
 
     memclear(args);
@@ -3549,50 +3378,26 @@ drm_public int drmPrimeHandleToFD(int fd, uint32_t handle, uint32_t flags,
     args.handle = handle;
     args.flags = flags;
     ret = drmIoctl(fd, DRM_IOCTL_PRIME_HANDLE_TO_FD, &args);
-    if (ret == 0) {
-        *prime_fd = args.fd;
-        return 0;
-    }
+    if (ret)
+        return ret;
 
-    memclear(xv6_args);
-    xv6_args.fd = -1;
-    xv6_args.handle = handle;
-    xv6_args.flags = flags;
-    if (ioctl(fd, XV6_FB_GPU_BO_EXPORT_FD, &xv6_args) == 0 &&
-        xv6_args.fd >= 0) {
-        *prime_fd = xv6_args.fd;
-        return 0;
-    }
-
-    return ret;
+    *prime_fd = args.fd;
+    return 0;
 }
 
 drm_public int drmPrimeFDToHandle(int fd, int prime_fd, uint32_t *handle)
 {
     struct drm_prime_handle args;
-    struct xv6_fb_gpu_bo_import_fd xv6_args;
     int ret;
 
     memclear(args);
     args.fd = prime_fd;
     ret = drmIoctl(fd, DRM_IOCTL_PRIME_FD_TO_HANDLE, &args);
-    if (ret == 0) {
-        *handle = args.handle;
-        return 0;
-    }
+    if (ret)
+        return ret;
 
-    memclear(xv6_args);
-    xv6_args.fd = prime_fd;
-    if (ioctl(fd, XV6_FB_GPU_BO_IMPORT_FD, &xv6_args) == 0 &&
-        xv6_args.handle != 0) {
-        if (xv6_args.addr != 0 && xv6_args.size != 0)
-            drm_munmap((void *)(uintptr_t)xv6_args.addr,
-                       (size_t)xv6_args.size);
-        *handle = xv6_args.handle;
-        return 0;
-    }
-
-    return ret;
+    *handle = args.handle;
+    return 0;
 }
 
 drm_public int drmCloseBufferHandle(int fd, uint32_t handle)
@@ -3613,7 +3418,7 @@ static char *drmGetMinorNameForFD(int fd, int type)
     const char *name = drmGetMinorName(type);
     int len;
     char dev_name[64], buf[64];
-    unsigned int maj, min;
+    int maj, min;
 
     if (!name)
         return NULL;
@@ -3623,7 +3428,8 @@ static char *drmGetMinorNameForFD(int fd, int type)
     if (fstat(fd, &sbuf))
         return NULL;
 
-    drmDecodeDeviceRdev(sbuf.st_rdev, &maj, &min);
+    maj = major(sbuf.st_rdev);
+    min = minor(sbuf.st_rdev);
 
     if (!drmNodeIsDRM(maj, min) || !S_ISCHR(sbuf.st_mode))
         return NULL;
@@ -3631,17 +3437,8 @@ static char *drmGetMinorNameForFD(int fd, int type)
     snprintf(buf, sizeof(buf), "/sys/dev/char/%d:%d/device/drm", maj, min);
 
     sysdir = opendir(buf);
-    if (!sysdir) {
-        if (maj == XV6_DRM_PRIMARY_MAJOR &&
-            min == XV6_DRM_PRIMARY_MINOR &&
-            type == DRM_NODE_PRIMARY)
-            return strdup(XV6_DRM_PRIMARY_NODE);
-        if (maj == XV6_DRM_RENDER_MAJOR &&
-            min == XV6_DRM_RENDER_MINOR &&
-            type == DRM_NODE_RENDER)
-            return strdup(XV6_DRM_RENDER_NODE);
+    if (!sysdir)
         return NULL;
-    }
 
     while ((ent = readdir(sysdir))) {
         if (strncmp(ent->d_name, name, len) == 0) {
@@ -3666,7 +3463,8 @@ static char *drmGetMinorNameForFD(int fd, int type)
     if (fstat(fd, &sbuf))
         return NULL;
 
-    drmDecodeDeviceRdev(sbuf.st_rdev, &maj, &min);
+    maj = major(sbuf.st_rdev);
+    min = minor(sbuf.st_rdev);
 
     if (!drmNodeIsDRM(maj, min) || !S_ISCHR(sbuf.st_mode))
         return NULL;
@@ -3708,7 +3506,8 @@ static char *drmGetMinorNameForFD(int fd, int type)
     if (fstat(fd, &sbuf))
         return NULL;
 
-    drmDecodeDeviceRdev(sbuf.st_rdev, &maj, &min);
+    maj = major(sbuf.st_rdev);
+    min = minor(sbuf.st_rdev);
 
     if (!drmNodeIsDRM(maj, min) || !S_ISCHR(sbuf.st_mode))
         return NULL;
@@ -3731,11 +3530,6 @@ drm_public char *drmGetPrimaryDeviceNameFromFd(int fd)
 
 drm_public char *drmGetRenderDeviceNameFromFd(int fd)
 {
-    (void)fd;
-
-    if (access(XV6_DRM_RENDER_NODE, R_OK | W_OK) == 0)
-        return strdup(XV6_DRM_RENDER_NODE);
-
     return drmGetMinorNameForFD(fd, DRM_NODE_RENDER);
 }
 
@@ -3834,10 +3628,6 @@ static int drmParseSubsystemType(int maj, int min)
     snprintf(path, sizeof(path), "/sys/dev/char/%d:%d/device", maj, min);
 
     subsystem_type = get_subsystem_type(path);
-    if (subsystem_type < 0 &&
-        ((maj == XV6_DRM_PRIMARY_MAJOR && min == XV6_DRM_PRIMARY_MINOR) ||
-         (maj == XV6_DRM_RENDER_MAJOR && min == XV6_DRM_RENDER_MINOR)))
-        return DRM_BUS_FAUX;
     /* Try to get the parent (underlying) device type */
     if (subsystem_type == DRM_BUS_VIRTIO) {
         /* Assume virtio-pci on error */
@@ -4684,15 +4474,8 @@ static int drmParseFauxBusInfo(int maj, int min, char *fullname)
 
     snprintf(path, sizeof(path), "/sys/dev/char/%d:%d/device", maj, min);
 
-    if (!realpath(path, real_path)) {
-        if ((maj == XV6_DRM_PRIMARY_MAJOR && min == XV6_DRM_PRIMARY_MINOR) ||
-            (maj == XV6_DRM_RENDER_MAJOR && min == XV6_DRM_RENDER_MINOR)) {
-            strncpy(fullname, "xv6-gpu", DRM_FAUX_DEVICE_NAME_LEN - 1);
-            fullname[DRM_FAUX_DEVICE_NAME_LEN - 1] = '\0';
-            return 0;
-        }
+    if (!realpath(path, real_path))
         return -errno;
-    }
 
     name = basename(real_path);
     if (!name)
@@ -4750,70 +4533,31 @@ process_device(drmDevicePtr *device, const char *d_name,
     const int max_node_length = ALIGN(drmGetMaxNodeName(), sizeof(void *));
 
     node_type = drmGetNodeType(d_name);
-    if (node_type < 0) {
-        if (drmXv6TraceEnabled())
-            fprintf(stderr, "xv6-libdrm: skip node name=%s bad-type\n",
-                    d_name);
+    if (node_type < 0)
         return -1;
-    }
 
     written = snprintf(node, PATH_MAX, "%s/%s", DRM_DIR_NAME, d_name);
-    if (written < 0) {
-        if (drmXv6TraceEnabled())
-            fprintf(stderr, "xv6-libdrm: skip node name=%s snprintf errno=%d\n",
-                    d_name, errno);
+    if (written < 0)
         return -1;
-    }
 
     /* anything longer than this will be truncated in drmDeviceAlloc.
      * Account for NULL byte
      */
-    if (written + 1 > max_node_length) {
-        if (drmXv6TraceEnabled())
-            fprintf(stderr, "xv6-libdrm: skip node=%s too-long len=%d max=%d\n",
-                    node, written + 1, max_node_length);
+    if (written + 1 > max_node_length)
         return -1;
-    }
 
-    if (stat(node, &sbuf)) {
-        if (drmXv6TraceEnabled())
-            fprintf(stderr, "xv6-libdrm: skip node=%s stat errno=%d (%s)\n",
-                    node, errno, strerror(errno));
+    if (stat(node, &sbuf))
         return -1;
-    }
 
-    if (drmIsXv6PrimaryNodeName(d_name)) {
-        maj = XV6_DRM_PRIMARY_MAJOR;
-        min = XV6_DRM_PRIMARY_MINOR;
-    } else if (drmIsXv6RenderNodeName(d_name)) {
-        maj = XV6_DRM_RENDER_MAJOR;
-        min = XV6_DRM_RENDER_MINOR;
-    } else {
-        drmDecodeDeviceRdev(sbuf.st_rdev, &maj, &min);
-    }
-    if (!drmNodeIsDRM(maj, min) || !S_ISCHR(sbuf.st_mode)) {
-        if (drmXv6TraceEnabled())
-            fprintf(stderr,
-                    "xv6-libdrm: skip node=%s maj=%u min=%u mode=0%o drm=%d chr=%d\n",
-                    node, maj, min, (unsigned int)sbuf.st_mode,
-                    drmNodeIsDRM(maj, min), S_ISCHR(sbuf.st_mode));
+    maj = major(sbuf.st_rdev);
+    min = minor(sbuf.st_rdev);
+
+    if (!drmNodeIsDRM(maj, min) || !S_ISCHR(sbuf.st_mode))
         return -1;
-    }
 
     subsystem_type = drmParseSubsystemType(maj, min);
-    if (req_subsystem_type != -1 && req_subsystem_type != subsystem_type) {
-        if (drmXv6TraceEnabled())
-            fprintf(stderr,
-                    "xv6-libdrm: skip node=%s subsystem=%d req=%d\n",
-                    node, subsystem_type, req_subsystem_type);
+    if (req_subsystem_type != -1 && req_subsystem_type != subsystem_type)
         return -1;
-    }
-
-    if (drmXv6TraceEnabled())
-        fprintf(stderr,
-                "xv6-libdrm: process node=%s type=%d maj=%u min=%u subsystem=%d fetch=%d\n",
-                node, node_type, maj, min, subsystem_type,
-                fetch_deviceinfo);
 
     switch (subsystem_type) {
     case DRM_BUS_PCI:
@@ -4959,7 +4703,7 @@ drm_public int drmGetDeviceFromDevId(dev_t find_rdev, uint32_t flags, drmDeviceP
     DIR *sysdir;
     struct dirent *dent;
     int subsystem_type;
-    unsigned int maj, min;
+    int maj, min;
     int ret, i, node_count;
 
     if (drm_device_validate_flags(flags))
@@ -4968,38 +4712,19 @@ drm_public int drmGetDeviceFromDevId(dev_t find_rdev, uint32_t flags, drmDeviceP
     if (device == NULL)
         return -EINVAL;
 
-    drmDecodeDeviceRdev(find_rdev, &maj, &min);
+    maj = major(find_rdev);
+    min = minor(find_rdev);
 
-    if (drmXv6TraceEnabled())
-        fprintf(stderr,
-                "xv6-libdrm: drmGetDeviceFromDevId rdev=0x%llx maj=%u min=%u flags=0x%x\n",
-                (unsigned long long)find_rdev, maj, min, flags);
-
-    if (!drmNodeIsDRM(maj, min)) {
-        if (drmXv6TraceEnabled())
-            fprintf(stderr,
-                    "xv6-libdrm: drmGetDeviceFromDevId non-drm maj=%u min=%u\n",
-                    maj, min);
+    if (!drmNodeIsDRM(maj, min))
         return -EINVAL;
-    }
 
     subsystem_type = drmParseSubsystemType(maj, min);
-    if (subsystem_type < 0) {
-        if (drmXv6TraceEnabled())
-            fprintf(stderr,
-                    "xv6-libdrm: drmGetDeviceFromDevId subsystem error=%d\n",
-                    subsystem_type);
+    if (subsystem_type < 0)
         return subsystem_type;
-    }
 
     sysdir = opendir(DRM_DIR_NAME);
-    if (!sysdir) {
-        if (drmXv6TraceEnabled())
-            fprintf(stderr,
-                    "xv6-libdrm: drmGetDeviceFromDevId opendir %s errno=%d (%s)\n",
-                    DRM_DIR_NAME, errno, strerror(errno));
+    if (!sysdir)
         return -errno;
-    }
 
     i = 0;
     while ((dent = readdir(sysdir))) {
@@ -5033,10 +4758,6 @@ drm_public int drmGetDeviceFromDevId(dev_t find_rdev, uint32_t flags, drmDeviceP
     }
 
     closedir(sysdir);
-    if (drmXv6TraceEnabled())
-        fprintf(stderr,
-                "xv6-libdrm: drmGetDeviceFromDevId nodes=%d found=%d\n",
-                node_count, *device != NULL);
     if (*device == NULL)
         return -ENODEV;
     return 0;
@@ -5045,10 +4766,10 @@ drm_public int drmGetDeviceFromDevId(dev_t find_rdev, uint32_t flags, drmDeviceP
 
 drm_public int drmGetNodeTypeFromDevId(dev_t devid)
 {
-    unsigned int maj, min;
-    int node_type;
+    int maj, min, node_type;
 
-    drmDecodeDeviceRdev(devid, &maj, &min);
+    maj = major(devid);
+    min = minor(devid);
 
     if (!drmNodeIsDRM(maj, min))
         return -EINVAL;
@@ -5132,24 +4853,14 @@ drm_public int drmGetDevices2(uint32_t flags, drmDevicePtr devices[],
         return -EINVAL;
 
     sysdir = opendir(DRM_DIR_NAME);
-    if (!sysdir) {
-        if (drmXv6TraceEnabled())
-            fprintf(stderr,
-                    "xv6-libdrm: drmGetDevices2 opendir %s errno=%d (%s)\n",
-                    DRM_DIR_NAME, errno, strerror(errno));
+    if (!sysdir)
         return -errno;
-    }
 
     i = 0;
     while ((dent = readdir(sysdir))) {
         ret = process_device(&device, dent->d_name, -1, devices != NULL, flags);
-        if (ret) {
-            if (drmXv6TraceEnabled())
-                fprintf(stderr,
-                        "xv6-libdrm: drmGetDevices2 ignored name=%s ret=%d\n",
-                        dent->d_name, ret);
+        if (ret)
             continue;
-        }
 
         if (i >= MAX_DRM_NODES) {
             fprintf(stderr, "More than %d drm nodes detected. "
@@ -5178,11 +4889,6 @@ drm_public int drmGetDevices2(uint32_t flags, drmDevicePtr devices[],
     }
 
     closedir(sysdir);
-
-    if (drmXv6TraceEnabled())
-        fprintf(stderr,
-                "xv6-libdrm: drmGetDevices2 flags=0x%x requested=%d nodes=%d devices=%d\n",
-                flags, devices != NULL, node_count, device_count);
 
     if (devices != NULL)
         return MIN2(device_count, max_devices);
@@ -5217,7 +4923,8 @@ drm_public char *drmGetDeviceNameFromFd2(int fd)
     if (fstat(fd, &sbuf))
         return NULL;
 
-    drmDecodeDeviceRdev(sbuf.st_rdev, &maj, &min);
+    maj = major(sbuf.st_rdev);
+    min = minor(sbuf.st_rdev);
 
     if (!drmNodeIsDRM(maj, min) || !S_ISCHR(sbuf.st_mode))
         return NULL;
@@ -5225,13 +4932,8 @@ drm_public char *drmGetDeviceNameFromFd2(int fd)
     snprintf(path, sizeof(path), "/sys/dev/char/%d:%d", maj, min);
 
     value = sysfs_uevent_get(path, "DEVNAME");
-    if (!value) {
-        if (maj == XV6_DRM_PRIMARY_MAJOR && min == XV6_DRM_PRIMARY_MINOR)
-            return strdup(XV6_DRM_PRIMARY_NODE);
-        if (maj == XV6_DRM_RENDER_MAJOR && min == XV6_DRM_RENDER_MINOR)
-            return strdup(XV6_DRM_RENDER_NODE);
+    if (!value)
         return NULL;
-    }
 
     snprintf(path, sizeof(path), "/dev/%s", value);
     free(value);
@@ -5244,13 +4946,13 @@ drm_public char *drmGetDeviceNameFromFd2(int fd)
     char             node[PATH_MAX + 1];
     const char      *dev_name;
     int              node_type;
-    unsigned int     maj, min;
-    int              n;
+    int              maj, min, n;
 
     if (fstat(fd, &sbuf))
         return NULL;
 
-    drmDecodeDeviceRdev(sbuf.st_rdev, &maj, &min);
+    maj = major(sbuf.st_rdev);
+    min = minor(sbuf.st_rdev);
 
     if (!drmNodeIsDRM(maj, min) || !S_ISCHR(sbuf.st_mode))
         return NULL;
